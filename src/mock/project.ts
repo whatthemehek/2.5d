@@ -1,5 +1,8 @@
 export type LayerTransform = { x: number; y: number; rotation: number; width: number; height: number; opacity: number }
-export type Layer = { id: string; name: string; depth: number; color: string; visible: boolean; transform: LayerTransform; components?: { id: string; name: string }[] }
+export type SketchPoint = { x: number; y: number }
+export type CutShape = { id: string; type: 'rect' | 'circle' | 'line' | 'spline'; points: SketchPoint[]; closed: boolean }
+export type CutPiece = { id: string; name: string; shapes: CutShape[]; x: number; y: number; visible: boolean }
+export type Layer = { id: string; name: string; depth: number; color: string; visible: boolean; transform: LayerTransform; components?: { id: string; name: string }[]; cuts?: CutShape[]; pieces?: CutPiece[] }
 export const layers: Layer[] = [
   { id: 'foreground', name: 'Foreground', depth: 900, color: '#6b8145', visible: true, transform: { x: 0, y: 0, rotation: 0, width: 25, height: 25, opacity: 100 } },
   { id: 'character', name: 'Character', depth: 420, color: '#db735a', visible: true, transform: { x: 0, y: 0, rotation: 0, width: 50, height: 50, opacity: 100 }, components: [{ id: 'head', name: 'Head' }, { id: 'body', name: 'Body' }, { id: 'left-arm', name: 'Left Arm' }, { id: 'right-arm', name: 'Right Arm' }] },
