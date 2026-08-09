@@ -1,10 +1,10 @@
 # Papercut
 
-Papercut is a planned web-based 2.5D papercut animation editor. This repository is **phase 1 only**: a polished, interactive editor wireframe made from mock data, HTML, SVG-like CSS artwork, and UI state.
+Papercut is a planned web-based 2.5D papercut animation editor. The repository now includes the phase-one editor shell plus an interactive vector-sketch and layer-cutting prototype built with typed UI state, DOM, CSS, and SVG.
 
 ## Current phase
 
-The app demonstrates the intended desktop workflow: layers, assets, creative tools, Compose/Stage views, an inspector, timeline, dialogs, selection, keyboard shortcuts, and paper-like scene depth. Editing, rendering, animation playback, importing, persistence, and export are deliberately mocked.
+The app demonstrates the intended desktop workflow: layers, assets, creative tools, Compose/Stage views, an inspector, timeline, dialogs, selection, keyboard shortcuts, and paper-like scene depth. Per-layer sketches, contour selection, merging, SVG-mask cutting, and direct manipulation are functional prototypes. True polygon-boolean geometry, production rendering, animation playback, importing, durable project persistence, and export remain unimplemented.
 
 ## Stack and setup
 

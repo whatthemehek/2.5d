@@ -1,12 +1,120 @@
-export type LayerTransform = { x: number; y: number; rotation: number; width: number; height: number; opacity: number }
+export type LayerTransform = {
+  x: number
+  y: number
+  rotation: number
+  width: number
+  height: number
+  opacity: number
+}
+
 export type SketchPoint = { x: number; y: number }
-export type CutShape = { id: string; type: 'rect' | 'circle' | 'line' | 'spline'; points: SketchPoint[]; closed: boolean }
-export type CutPiece = { id: string; name: string; shapes: CutShape[]; x: number; y: number; rotation?: number; visible: boolean }
-export type Layer = { id: string; name: string; depth: number; color: string; visible: boolean; transform: LayerTransform; components?: { id: string; name: string }[]; cuts?: CutShape[]; pieces?: CutPiece[] }
+export type ShapeType = 'rect' | 'circle' | 'line' | 'spline' | 'pen'
+export type CutShape = {
+  id: string
+  type: ShapeType
+  points: SketchPoint[]
+  closed: boolean
+}
+export type SketchObject = {
+  id: string
+  name: string
+  shapes: CutShape[]
+  closed: boolean
+  visible: boolean
+}
+export type CutPiece = {
+  id: string
+  name: string
+  sourceSketchId?: string
+  shapes: CutShape[]
+  x: number
+  y: number
+  rotation: number
+  visible: boolean
+}
+export type Layer = {
+  id: string
+  name: string
+  depth: number
+  color: string
+  visible: boolean
+  transform: LayerTransform
+  sheetTransform: { x: number; y: number; rotation: number }
+  components?: { id: string; name: string }[]
+  sketches: SketchObject[]
+  cuts: CutShape[]
+  pieces: CutPiece[]
+}
+
+const transform = (width: number, height: number): LayerTransform => ({
+  x: 0,
+  y: 0,
+  rotation: 0,
+  width,
+  height,
+  opacity: 100
+})
+const sheetTransform = () => ({ x: 0, y: 0, rotation: 0 })
+
 export const layers: Layer[] = [
-  { id: 'foreground', name: 'Foreground', depth: 900, color: '#6b8145', visible: true, transform: { x: 0, y: 0, rotation: 0, width: 25, height: 25, opacity: 100 } },
-  { id: 'character', name: 'Character', depth: 420, color: '#db735a', visible: true, transform: { x: 0, y: 0, rotation: 0, width: 50, height: 50, opacity: 100 }, components: [{ id: 'head', name: 'Head' }, { id: 'body', name: 'Body' }, { id: 'left-arm', name: 'Left Arm' }, { id: 'right-arm', name: 'Right Arm' }] },
-  { id: 'background', name: 'Background', depth: 0, color: '#8bb7c6', visible: true, transform: { x: 0, y: 0, rotation: 0, width: 100, height: 100, opacity: 100 } }
+  {
+    id: 'foreground',
+    name: 'Foreground',
+    depth: 900,
+    color: '#6b8145',
+    visible: true,
+    transform: transform(25, 25),
+    sheetTransform: sheetTransform(),
+    sketches: [],
+    cuts: [],
+    pieces: []
+  },
+  {
+    id: 'character',
+    name: 'Character',
+    depth: 420,
+    color: '#db735a',
+    visible: true,
+    transform: transform(50, 50),
+    sheetTransform: sheetTransform(),
+    components: [
+      { id: 'head', name: 'Head' },
+      { id: 'body', name: 'Body' },
+      { id: 'left-arm', name: 'Left Arm' },
+      { id: 'right-arm', name: 'Right Arm' }
+    ],
+    sketches: [],
+    cuts: [],
+    pieces: []
+  },
+  {
+    id: 'background',
+    name: 'Background',
+    depth: 0,
+    color: '#8bb7c6',
+    visible: true,
+    transform: transform(100, 100),
+    sheetTransform: sheetTransform(),
+    sketches: [],
+    cuts: [],
+    pieces: []
+  }
 ]
-export const assets = [{ name: 'White paper', color: '#eee6d4' }, { name: 'Kraft paper', color: '#bd925f' }, { name: 'Watercolor', color: '#b8c3af' }, { name: 'Cardboard', color: '#9b704b' }, { name: 'Plywood', color: '#c59a68' }, { name: 'Red construction', color: '#bd4e42' }]
-export const tracks = ['Camera', 'Foreground', 'Character', 'Left Arm', 'Right Arm', 'Background']
+
+export const assets = [
+  { name: 'White paper', color: '#eee6d4' },
+  { name: 'Kraft paper', color: '#bd925f' },
+  { name: 'Watercolor', color: '#b8c3af' },
+  { name: 'Cardboard', color: '#9b704b' },
+  { name: 'Plywood', color: '#c59a68' },
+  { name: 'Red construction', color: '#bd4e42' }
+]
+
+export const tracks = [
+  'Camera',
+  'Foreground',
+  'Character',
+  'Left Arm',
+  'Right Arm',
+  'Background'
+]

@@ -1,74 +1,1712 @@
-import { useEffect, useRef, useState } from 'react'
+import {
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode
+} from 'react'
 import * as I from 'lucide-react'
-import { assets, tracks, type CutShape } from '../mock/project'
+import {
+  assets,
+  tracks,
+  type CutShape,
+  type Layer,
+  type SketchObject,
+  type SketchPoint
+} from '../mock/project'
 import paperTexture from '../assets/paper001/Paper001_2K-JPG_Color.jpg'
-import { useUIStore } from '../state/uiStore'
 import { EmptyState, IconButton, Property, Section } from '../components/ui'
+import { useUIStore, type EditorTool } from '../state/uiStore'
 
-const tools = [['Select', I.MousePointer2], ['Move', I.Move], ['Rotate', I.RotateCw], ['Scale', I.Maximize], ['Depth', I.Layers3], ['Set Pivot', I.Crosshair], ['Rectangle', I.Square], ['Circle', I.Circle], ['Line', I.Minus], ['Spline', I.Spline], ['Pen', I.PenTool], ['Cut Shape', I.Scissors], ['Freehand Cut', I.Spline], ['Tear Edge', I.Waves], ['Motion Path', I.Route], ['Radial Motion', I.CircleDot], ['Camera', I.Camera]] as const
-const menus = { File: ['New Project', 'Open Project', 'Save', 'Save As', 'Import Artwork', 'Export'], Edit: ['Undo', 'Redo', 'Cut', 'Copy', 'Paste'], View: ['Grid', 'Safe Frame', 'Fit to View'], Project: ['Project Settings', 'Scene Lighting'], Help: ['Keyboard Shortcuts', 'About Papercut'] }
-
-function Toolbar() { const { mode, setMode, setDialog, saveProject, saveStatus } = useUIStore(); const [open, setOpen] = useState<string | null>(null); return <header className="toolbar"><div className="wordmark"><span>✦</span> Papercut</div>{Object.keys(menus).map((menu) => <div className="menu" key={menu}><button onClick={() => setOpen(open === menu ? null : menu)}>{menu}</button>{open === menu && <div className="dropdown">{menus[menu as keyof typeof menus].map((item) => <button key={item} onClick={() => { setOpen(null); if (item === 'Save') saveProject(); if (item === 'New Project') setDialog('new'); if (item === 'Import Artwork') setDialog('import'); if (item === 'Export') setDialog('export'); if (item === 'Keyboard Shortcuts') setDialog('shortcuts') }}>{item}</button>)}</div>}</div>)}<span className="toolbar-divider"/><IconButton label="Undo"><I.Undo2 size={15}/></IconButton><IconButton label="Redo"><I.Redo2 size={15}/></IconButton><div className="project-name">Untitled Paper Scene <small className={saveStatus}>● {saveStatus === 'saved' ? 'Saved' : 'Unsaved'}</small></div><div className="mode-switch"><button className={mode === 'compose' ? 'active' : ''} onClick={() => setMode('compose')}>Compose</button><button className={mode === 'stage' ? 'active' : ''} onClick={() => setMode('stage')}>Stage</button></div><button className="button" onClick={() => setDialog('preview')}><I.Play size={14}/> Preview</button><button className="button accent" onClick={() => setDialog('export')}><I.Share2 size={14}/> Export</button></header> }
-
-function Sidebar() { const [dragging, setDragging] = useState<string | null>(null); const [dropTarget, setDropTarget] = useState<string | null>(null); const { tab, setTab, selected, select, material, setMaterial, tool, setTool, sceneLayers, addLayer, removeLayer, setLayerDepth, toggleLayerVisibility, renameLayer, setLayerColor, reorderLayer, reorderMode, setReorderMode, sketch, addSketchShape, clearSketch, applySketch, joinSelectedPieces, selectedPieces } = useUIStore(); const atLimit = sceneLayers.length >= 3; return <aside className="sidebar"><div className="tabs">{(["layers", "assets", "tools"] as const).map((name) => <button key={name} onClick={() => setTab(name)} className={tab === name ? "active" : ""}>{name}</button>)}</div>{tab === "layers" && <div className="sidebar-content"><div className="sidebar-label">SCENE LAYERS <small>{sceneLayers.length} / 3</small></div><label className="reorder-mode">Reorder depth<select aria-label="Reorder depth mode" value={reorderMode} onChange={(event) => setReorderMode(event.target.value as "cascade" | "split")}><option value="cascade">Cascade</option><option value="split">Split</option></select></label><p className="reorder-help">{reorderMode === "cascade" ? "Reassign every layer to the existing depth slots." : "Insert the moved layer midway between its new neighbors."}</p>{sceneLayers.map((layer) => <div key={layer.id} className={"layer-entry " + (dropTarget === layer.id && dragging !== layer.id ? "drop-target" : "")} data-layer-id={layer.id} onDragOver={(event) => { event.preventDefault(); setDropTarget(layer.id) }} onDrop={(event) => { event.preventDefault(); if (dragging) reorderLayer(dragging, layer.id); setDragging(null); setDropTarget(null) }}><div className={"layer-row " + (selected === layer.id ? "selected" : "")}><button className="layer-select" onClick={(event) => { if (!(event.target as HTMLElement).closest('[data-piece-id]')) select(layer.id) }}><span className="drag-handle" draggable aria-label={"Drag " + layer.name} onDragStart={() => setDragging(layer.id)} onDragEnd={() => { setDragging(null); setDropTarget(null) }}><I.GripVertical size={13}/></span><span className="thumb" style={{ background: layer.color }}/><input aria-label={"Rename " + layer.name} value={layer.name} onClick={(event) => event.stopPropagation()} onChange={(event) => renameLayer(layer.id, event.target.value)}/></button><button className="visibility-layer" onClick={() => toggleLayerVisibility(layer.id)} title={layer.visible ? "Hide " + layer.name : "Show " + layer.name} aria-label={layer.visible ? "Hide " + layer.name : "Show " + layer.name}>{layer.visible ? <I.Eye size={14}/> : <I.EyeOff size={14}/>}</button><input className="layer-color" aria-label={"Color for " + layer.name} type="color" value={layer.color} onChange={(event) => setLayerColor(layer.id, event.target.value)}/><button className="remove-layer" onClick={() => removeLayer(layer.id)} title={"Remove " + layer.name} aria-label={"Remove " + layer.name}><I.Trash2 size={13}/></button></div><label className="depth-editor"><span>Depth</span><input aria-label={"Depth for " + layer.name} type="number" value={layer.depth} onChange={(event) => setLayerDepth(layer.id, Number(event.target.value))}/><small>px</small></label></div>)}{sceneLayers.length === 0 && <EmptyState title="No layers" text="Add up to three prototype layers."/>}<button className="add-layer" disabled={atLimit} onClick={addLayer} title={atLimit ? "This prototype supports up to three layers." : "Add a prototype layer"}><I.Plus size={15}/> Add Layer <small>{sceneLayers.length} / 3</small></button></div>}{tab === "assets" && <div className="sidebar-content"><div className="sidebar-label">PAPER TEXTURES</div><div className="assets">{assets.map((asset) => <button key={asset.name} className={material === asset.name ? "selected" : ""} onClick={() => setMaterial(asset.name)}><span style={{ background: asset.color }} />{asset.name}</button>)}</div><div className="sidebar-label">MATERIAL PRESETS</div><EmptyState title="More assets coming" text="Import artwork is a prototype action." /></div>}{tab === "tools" && <div className="sidebar-content tools">{tools.map(([name, Icon]) => <button key={name} onClick={() => setTool(name)} className={tool === name ? "selected" : ""}><Icon size={16}/><span>{name}</span><kbd>{name[0]}</kbd></button>)}<div className="cut-actions"><strong>SKETCH · {sketch.length}</strong><button onClick={() => addSketchShape({ id: "shape-" + Date.now(), type: "rect", points: [{x:22,y:25},{x:54,y:60}], closed:true })}>+ Rectangle primitive</button><button onClick={() => addSketchShape({ id: "shape-" + Date.now(), type: "circle", points: [{x:48,y:28},{x:72,y:56}], closed:true })}>+ Circle primitive</button><button onClick={() => addSketchShape({ id: "shape-" + Date.now(), type: "line", points: [{x:18,y:70},{x:82,y:34}], closed:false })}>+ Line / split primitive</button><button onClick={applySketch} disabled={!sketch.length}>Apply cut to selected layer</button><button onClick={clearSketch} disabled={!sketch.length}>Clear sketch</button><button onClick={joinSelectedPieces} disabled={selectedPieces.length < 2}>Join selected ({selectedPieces.length})</button></div></div>}</aside> }
-
-function Scene() {
-  const { mode, selected, grid, safeFrame, tool, toggleGrid, toggleSafe, sceneLayers, orbit, setOrbit, resetOrbit, select, zoom, zoomIn, zoomOut, resetZoom, setZoom, selectedPieces, togglePieceSelection, movePiece, rotatePiece, sketch, addSketchShape, moveSketch, setSketchShape, rotateSketch, applySketch, setLayerTransform, setLayerDepth } = useUIStore()
-  const stageRef = useRef<HTMLDivElement | null>(null); const [liveShape, setLiveShape] = useState<CutShape | null>(null); const [selectedSketch, setSelectedSketch] = useState<string | null>(null)
-  const gesture = useRef<{ kind: string; id?: string; x: number; y: number; startX?: number; startY?: number; rotation?: number; width?: number; height?: number; depth?: number; points?: { x: number; y: number }[] } | null>(null)
-  const drawTools: Record<string, 'rect' | 'circle' | 'line' | 'spline'> = { Rectangle: 'rect', Circle: 'circle', Line: 'line', Spline: 'spline', Pen: 'spline', 'Freehand Cut': 'spline' }
-  const depths = sceneLayers.map((layer) => layer.depth)
-  const span = depths.length ? Math.max(...depths) - Math.min(...depths) : 0
-  const autoFit = mode === 'stage' ? Math.max(.48, Math.min(.88, 900 / (900 + span * .55))) : 1
-  const visibleZoom = zoom * autoFit
-  const point = (event: React.PointerEvent<HTMLDivElement>) => { const rect = stageRef.current!.getBoundingClientRect(); return { x: Math.max(0, Math.min(100, (event.clientX - rect.left) / rect.width * 100)), y: Math.max(0, Math.min(100, (event.clientY - rect.top) / rect.height * 100)) } }
-  const onWheel = (event: React.WheelEvent<HTMLDivElement>) => { event.preventDefault(); setZoom(zoom + (event.deltaY < 0 ? .08 : -.08)) }
-  const onDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    const target = event.target as HTMLElement
-    if (mode === 'stage') { gesture.current = { kind: 'orbit', x: event.clientX, y: event.clientY, startX: orbit.x, startY: orbit.y }; event.currentTarget.setPointerCapture(event.pointerId); return }
-    if (tool === 'Cut Shape') { applySketch(); return }
-    const piece = target.closest<HTMLElement>('[data-piece-id]')
-    const sketchEl = target.closest<HTMLElement>('[data-sketch-id]'); if (sketchEl) { const id = sketchEl.dataset.sketchId!; const shape = sketch.find(item => item.id === id); if (shape) { setSelectedSketch(id); const points = shape.points.map(p => ({ ...p })); if (tool === "Select" || tool === "Move") gesture.current = { kind: "sketchMoveOne", id, x: event.clientX, y: event.clientY, points }; if (tool === "Rotate") gesture.current = { kind: "sketchRotateOne", id, x: event.clientX, y: event.clientY, points }; if (tool === "Scale") gesture.current = { kind: "sketchScaleOne", id, x: event.clientX, y: event.clientY, points }; event.currentTarget.setPointerCapture(event.pointerId); return } } const layerEl = target.closest<HTMLElement>('[data-layer-id]')
-    if (piece) { const id = piece.dataset.pieceId!; togglePieceSelection(id, event.shiftKey); if (tool === 'Move') gesture.current = { kind: 'pieceMove', id, x: event.clientX, y: event.clientY }; if (tool === 'Rotate') gesture.current = { kind: 'pieceRotate', id, x: event.clientX, y: event.clientY }; event.currentTarget.setPointerCapture(event.pointerId); return }
-    const layerId = layerEl?.dataset.layerId ?? selected
-    const layer = sceneLayers.find((item) => item.id === layerId)
-    if (!layer) return
-    select(layerId)
-    const drawing = drawTools[tool]
-    if (drawing) { const p = point(event); const next = { id: "live", type: drawing, points: [p, p], closed: drawing === "rect" || drawing === "circle" } as CutShape; setLiveShape(next); gesture.current = { kind: 'draw', id: drawing, x: p.x, y: p.y }; event.currentTarget.setPointerCapture(event.pointerId); return }
-    if (tool === 'Move' && sketch.length) gesture.current = { kind: 'sketchMove', x: event.clientX, y: event.clientY }
-    else if (tool === 'Rotate' && sketch.length) gesture.current = { kind: 'sketchRotate', x: event.clientX, y: event.clientY }
-    else if (tool === 'Move') gesture.current = { kind: 'layerMove', id: layerId, x: event.clientX, y: event.clientY, startX: layer.transform.x, startY: layer.transform.y }
-    else if (tool === 'Rotate') gesture.current = { kind: 'layerRotate', id: layerId, x: event.clientX, y: event.clientY, rotation: layer.transform.rotation }
-    else if (tool === 'Scale') gesture.current = { kind: 'layerScale', id: layerId, x: event.clientX, y: event.clientY, width: layer.transform.width, height: layer.transform.height }
-    else if (tool === 'Depth') gesture.current = { kind: 'layerDepth', id: layerId, x: event.clientX, y: event.clientY, depth: layer.depth }
-    event.currentTarget.setPointerCapture(event.pointerId)
-  }
-  const onMove = (event: React.PointerEvent<HTMLDivElement>) => {
-    const g = gesture.current; if (!g) return
-    const dx = event.clientX - g.x, dy = event.clientY - g.y
-    if (g.kind === 'draw' && g.id) { const p = point(event); setLiveShape({ id: "live", type: g.id as CutShape["type"], points: [{ x: g.x, y: g.y }, p], closed: g.id === "rect" || g.id === "circle" }) }
-    if (g.kind === 'sketchMoveOne' && g.id && g.points) { const px = dx / stageRef.current!.clientWidth * 100, py = dy / stageRef.current!.clientHeight * 100; setSketchShape(g.id, g.points.map(p => ({ x: Math.max(0, Math.min(100, p.x + px)), y: Math.max(0, Math.min(100, p.y + py)) }))) }
-    if (g.kind === 'sketchScaleOne' && g.id && g.points) { const px = dx / stageRef.current!.clientWidth * 100, py = dy / stageRef.current!.clientHeight * 100; setSketchShape(g.id, g.points.map((p, i) => i === g.points!.length - 1 ? ({ x: Math.max(0, Math.min(100, p.x + px)), y: Math.max(0, Math.min(100, p.y + py)) }) : p)) }
-    if (g.kind === 'sketchRotateOne' && g.id && g.points) { const cx = g.points.reduce((sum,p) => sum + p.x, 0) / g.points.length, cy = g.points.reduce((sum,p) => sum + p.y, 0) / g.points.length, rad = dx * .01; setSketchShape(g.id, g.points.map(p => ({ x: cx + (p.x-cx)*Math.cos(rad) - (p.y-cy)*Math.sin(rad), y: cy + (p.x-cx)*Math.sin(rad) + (p.y-cy)*Math.cos(rad) }))) }
-    if (g.kind === 'orbit') setOrbit({ x: Math.max(-72, Math.min(72, (g.startX ?? 0) + dy * .35)), y: Math.max(-72, Math.min(72, (g.startY ?? 0) + dx * .35)) })
-    if (g.kind === 'pieceMove' && g.id) { movePiece(g.id, dx, dy); g.x = event.clientX; g.y = event.clientY }
-    if (g.kind === 'pieceRotate' && g.id) { rotatePiece(g.id, dx * .5); g.x = event.clientX }
-    if (g.kind === 'sketchMove') { moveSketch(dx / stageRef.current!.clientWidth * 100, dy / stageRef.current!.clientHeight * 100); g.x = event.clientX; g.y = event.clientY }
-    if (g.kind === 'sketchRotate') { rotateSketch(dx * .35); g.x = event.clientX }
-    if (g.kind === 'layerMove' && g.id) { setLayerTransform(g.id, 'x', (g.startX ?? 0) + dx); setLayerTransform(g.id, 'y', (g.startY ?? 0) + dy) }
-    if (g.kind === 'layerRotate' && g.id) setLayerTransform(g.id, 'rotation', (g.rotation ?? 0) + dx * .45)
-    if (g.kind === 'layerScale' && g.id) { setLayerTransform(g.id, 'width', (g.width ?? 0) + dx * .16); setLayerTransform(g.id, 'height', (g.height ?? 0) + dy * .16) }
-    if (g.kind === 'layerDepth' && g.id) setLayerDepth(g.id, (g.depth ?? 0) + dx * 2)
-  }
-  const onUp = () => { if (liveShape && Math.abs(liveShape.points[1].x-liveShape.points[0].x) + Math.abs(liveShape.points[1].y-liveShape.points[0].y) > 1) { const shape = { ...liveShape, id: "shape-" + Date.now() }; addSketchShape(shape); setSelectedSketch(shape.id) } setLiveShape(null); gesture.current = null }
-  return <main className={'viewport layer-viewport ' + mode}><div className="viewport-controls"><button onClick={toggleGrid} className={grid ? 'active' : ''}><I.Grid3X3 size={15}/> Grid</button><button onClick={toggleSafe} className={safeFrame ? 'active' : ''}><I.RectangleHorizontal size={15}/> Safe</button>{mode === 'stage' && <><button onClick={resetOrbit}><I.Rotate3D size={15}/> Reset view</button><span>Drag to orbit</span></>}<button aria-label="Zoom out" onClick={zoomOut}><I.Minus size={15}/></button><span>{Math.round(visibleZoom * 100)}%</span><button aria-label="Zoom in" onClick={zoomIn}><I.Plus size={15}/></button><button onClick={resetZoom}>Fit</button></div><div className="tool-hint"><I.Layers3 size={14}/>{mode === 'stage' ? 'Orbit Stage · drag to inspect depth' : tool === 'Cut Shape' ? 'Cut Shape · click a selected layer to apply the sketch' : tool + ' · drag on a selected layer'}</div><div ref={stageRef} className={'layer-stage ' + (grid ? 'with-grid' : '')} onWheel={onWheel} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp}><div className="stage-orbit" style={{ transform: mode === 'stage' ? 'scale(' + visibleZoom + ') rotateX(' + orbit.x + 'deg) rotateY(' + orbit.y + 'deg)' : 'scale(' + zoom + ')' }}>{sceneLayers.filter((layer) => layer.visible).slice().sort((a,b) => a.depth - b.depth).map((layer) => { const transform = layer.transform; return <button data-layer-id={layer.id} key={layer.id} onClick={(event) => { if (!(event.target as HTMLElement).closest('[data-piece-id], [data-sketch-id]')) select(layer.id) }} className={'paper-layer ' + (selected === layer.id ? 'selected' : '')} style={{ width: transform.width + '%', height: transform.height + '%', backgroundColor: 'transparent', backgroundImage: 'none', opacity: transform.opacity / 100, transform: mode === 'stage' ? 'translate(-50%, -50%) translate3d(' + transform.x + 'px, ' + transform.y + 'px, ' + layer.depth + 'px) rotateZ(' + transform.rotation + 'deg)' : 'translate(-50%, -50%) translate(' + transform.x + 'px, ' + transform.y + 'px) rotate(' + transform.rotation + 'deg)' }}><svg className="paper-sheet" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><defs><pattern id={"paper-" + layer.id} width="100" height="100" patternUnits="userSpaceOnUse"><image href={paperTexture} width="100" height="100" preserveAspectRatio="xMidYMid slice"/></pattern><mask id={"cut-mask-" + layer.id}><rect width="100" height="100" fill="white"/>{(layer.cuts ?? []).map(shape => <>{shape.type === "circle" ? <ellipse key={shape.id} cx={(shape.points[0].x + shape.points[1].x)/2} cy={(shape.points[0].y + shape.points[1].y)/2} rx={Math.abs(shape.points[1].x-shape.points[0].x)/2} ry={Math.abs(shape.points[1].y-shape.points[0].y)/2} fill="black"/> : shape.type === "line" || shape.type === "spline" ? <line key={shape.id} x1={shape.points[0].x} y1={shape.points[0].y} x2={shape.points[1].x} y2={shape.points[1].y} stroke="black" strokeWidth="1.4"/> : <rect key={shape.id} x={Math.min(shape.points[0].x,shape.points[1].x)} y={Math.min(shape.points[0].y,shape.points[1].y)} width={Math.abs(shape.points[1].x-shape.points[0].x)} height={Math.abs(shape.points[1].y-shape.points[0].y)} fill="black"/>}</>)}</mask></defs><rect width="100" height="100" fill={"url(#paper-" + layer.id + ")"} style={{ mixBlendMode: "multiply" }} mask={"url(#cut-mask-" + layer.id + ")"}/><rect width="100" height="100" fill={layer.color} opacity=".68" mask={"url(#cut-mask-" + layer.id + ")"}/></svg><em>{layer.depth}px</em>{layer.pieces?.filter(piece => piece.visible).map(piece => { const shape = piece.shapes[0]; const a = shape.points[0]; const b = shape.points[shape.points.length - 1] ?? a; return <span data-piece-id={piece.id} key={piece.id} role="button" tabIndex={0} aria-label={piece.name} className={'cut-piece ' + shape.type + (selectedPieces.includes(piece.id) ? ' selected' : '')} style={{ left: Math.min(a.x,b.x) + '%', top: Math.min(a.y,b.y) + '%', width: Math.max(5, Math.abs(b.x-a.x)) + '%', height: Math.max(5, Math.abs(b.y-a.y)) + '%', backgroundColor: layer.color, backgroundImage: 'url(' + paperTexture + ')', backgroundBlendMode: 'multiply', transform: 'translate(' + piece.x + 'px, ' + piece.y + 'px) rotate(' + (piece.rotation ?? 0) + 'deg)' }} /> })}{mode === 'compose' && selected === layer.id && sketch.map(shape => { const a = shape.points[0]; const b = shape.points[shape.points.length - 1] ?? a; return <span data-sketch-id={shape.id} key={shape.id} className={'sketch-preview ' + shape.type + (selectedSketch === shape.id ? ' selected' : '')} style={{ left: Math.min(a.x,b.x) + '%', top: Math.min(a.y,b.y) + '%', width: Math.max(5, Math.abs(b.x-a.x)) + '%', height: Math.max(5, Math.abs(b.y-a.y)) + '%' }} /> })}{mode === 'compose' && selected === layer.id && liveShape && (() => { const a = liveShape.points[0]; const b = liveShape.points[1]; return <span className={'sketch-preview live ' + liveShape.type} style={{ left: Math.min(a.x,b.x) + '%', top: Math.min(a.y,b.y) + '%', width: Math.max(2, Math.abs(b.x-a.x)) + '%', height: Math.max(2, Math.abs(b.y-a.y)) + '%' }} /> })()}</button> })}</div>{safeFrame && <div className="safe-frame"/>}{mode === 'stage' && <div className="stage-grid"/>}</div></main>
+const drawTools: { name: EditorTool; icon: typeof I.Square; hint: string }[] = [
+  {
+    name: 'Rectangle',
+    icon: I.Square,
+    hint: 'Drag a rectangular closed contour'
+  },
+  { name: 'Circle', icon: I.Circle, hint: 'Drag an elliptical closed contour' },
+  { name: 'Line', icon: I.Minus, hint: 'Drag a straight open segment' },
+  { name: 'Pen', icon: I.PenTool, hint: 'Drag a freehand contour' },
+  { name: 'Spline', icon: I.Spline, hint: 'Drag a smooth editable curve' }
+]
+const editTools: {
+  name: EditorTool
+  icon: typeof I.MousePointer2
+  hint: string
+}[] = [
+  { name: 'Select', icon: I.MousePointer2, hint: 'Select and drag an object' },
+  { name: 'Move', icon: I.Move, hint: 'Move the selected object' },
+  { name: 'Rotate', icon: I.RotateCw, hint: 'Drag horizontally to rotate' },
+  { name: 'Scale', icon: I.Maximize, hint: 'Drag to resize' }
+]
+const menus = {
+  File: ['New Project', 'Open Project', 'Save', 'Import Artwork', 'Export'],
+  Edit: ['Undo', 'Redo', 'Cut', 'Copy', 'Paste'],
+  View: ['Grid', 'Safe Frame', 'Fit to View'],
+  Project: ['Project Settings', 'Scene Lighting'],
+  Help: ['Keyboard Shortcuts', 'About Papercut']
 }
 
-function Inspector() { const { selected, material, sceneLayers, setLayerTransform, setLayerDepth } = useUIStore(); const layer = sceneLayers.find((item) => item.id === selected); const transform = layer?.transform; const selectedName = layer?.name ?? (selected ? selected.split('-').map((part) => part ? part[0].toUpperCase() + part.slice(1) : "").join(' ') : "No selection"); const update = (field: keyof NonNullable<typeof transform>, value: string) => { if (!layer || !Number.isFinite(Number(value))) return; setLayerTransform(layer.id, field, Number(value)) }; return <aside className="inspector"><div className="inspector-title"><span>INSPECTOR</span><strong>{selectedName}</strong></div><Section id="transform" title="Transform"><div className="properties"><Property key={(layer?.id ?? selected) + "-x"} label="X" value={transform?.x ?? 0} keyId="x" onChange={(value) => update("x", value)}/><Property key={(layer?.id ?? selected) + "-y"} label="Y" value={transform?.y ?? 0} keyId="y" onChange={(value) => update("y", value)}/><Property key={(layer?.id ?? selected) + "-depth"} label="Depth" value={layer?.depth ?? 0} keyId="depth" onChange={(value) => { if (layer && Number.isFinite(Number(value))) setLayerDepth(layer.id, Number(value)) }}/><Property key={(layer?.id ?? selected) + "-rotation"} label="Rotation" value={transform?.rotation ?? 0} keyId="rotation" onChange={(value) => update("rotation", value)}/><Property key={(layer?.id ?? selected) + "-width"} label="Width" value={transform?.width ?? 100} onChange={(value) => update("width", value)}/><Property key={(layer?.id ?? selected) + "-height"} label="Height" value={transform?.height ?? 100} onChange={(value) => update("height", value)}/><Property key={(layer?.id ?? selected) + "-opacity"} label="Opacity" value={transform?.opacity ?? 100} onChange={(value) => update("opacity", value)}/></div></Section><Section id="layer" title="Layer"><div className="properties"><Property label="Logical layer" value={layer?.name ?? "No layer selected"}/><Property label="Local depth" value={layer ? layer.depth : 0}/></div><div className="button-row"><button>Move Forward</button><button>Move Backward</button></div><button className="wide-button">Reassign Layer</button></Section><Section id="motion" title="Pivot & Motion"><div className="properties"><Property label="Pivot X" value="50%"/><Property label="Pivot Y" value="52%"/><Property label="Motion type" value="Free Transform"/></div><button className="wide-button">Edit Motion Path</button></Section><Section id="edge" title="Cut Edge"><div className="properties"><Property label="Style" value="Clean Cut"/><Property label="Roughness" value="0"/><Property label="Fiber amount" value="12%"/><Property label="Edge width" value="1 px"/></div></Section><Section id="material" title="Material"><div className="material-preview"><span></span><div><strong>{material}</strong><small>Front · Back · Edge texture</small></div></div><div className="properties"><Property label="Texture scale" value="100%"/><Property label="Roughness" value="65%"/><Property label="Thickness" value="2.5 mm"/></div></Section><Section id="shadow" title="Shadow"><div className="toggle-row"><span>Cast shadow</span><button className="toggle on">●</button></div><div className="toggle-row"><span>Receive shadow</span><button className="toggle on">●</button></div><div className="properties"><Property label="Strength" value="42%"/><Property label="Softness" value="18"/><Property label="Edge lift" value="3 px"/></div></Section></aside> }
+function TopToolbar() {
+  const { mode, setMode, setDialog, saveProject, saveStatus } = useUIStore()
+  const [open, setOpen] = useState<string | null>(null)
+  return (
+    <header className="toolbar">
+      <div className="wordmark">
+        <span>✦</span> Papercut
+      </div>
+      {Object.keys(menus).map((menu) => (
+        <div className="menu" key={menu}>
+          <button onClick={() => setOpen(open === menu ? null : menu)}>
+            {menu}
+          </button>
+          {open === menu && (
+            <div className="dropdown">
+              {menus[menu as keyof typeof menus].map((item) => (
+                <button
+                  key={item}
+                  onClick={() => {
+                    setOpen(null)
+                    if (item === 'Save') saveProject()
+                    if (item === 'New Project') setDialog('new')
+                    if (item === 'Import Artwork') setDialog('import')
+                    if (item === 'Export') setDialog('export')
+                    if (item === 'Keyboard Shortcuts') setDialog('shortcuts')
+                  }}
+                >
+                  {item}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+      <span className="toolbar-divider" />
+      <IconButton label="Undo">
+        <I.Undo2 size={15} />
+      </IconButton>
+      <IconButton label="Redo">
+        <I.Redo2 size={15} />
+      </IconButton>
+      <div className="project-name">
+        Untitled Paper Scene{' '}
+        <small className={saveStatus}>
+          ● {saveStatus === 'saved' ? 'Saved' : 'Unsaved'}
+        </small>
+      </div>
+      <div className="mode-switch" aria-label="Workspace mode">
+        {(['compose', 'sketch', 'stage'] as const).map((item) => (
+          <button
+            key={item}
+            className={mode === item ? 'active' : ''}
+            onClick={() => setMode(item)}
+          >
+            {item[0].toUpperCase() + item.slice(1)}
+          </button>
+        ))}
+      </div>
+      <button className="button" onClick={() => setDialog('preview')}>
+        <I.Play size={14} /> Preview
+      </button>
+      <button className="button accent" onClick={() => setDialog('export')}>
+        <I.Share2 size={14} /> Export
+      </button>
+    </header>
+  )
+}
 
-function Timeline() { const { time, setTime, playing, togglePlaying, selected, select } = useUIStore(); const pct = (time / 12) * 100; return <section className="timeline"><div className="resize-handle"></div><div className="timeline-top"><div className="transport"><IconButton label="Go to start"><I.SkipBack size={15}/></IconButton><IconButton label="Previous frame"><I.StepBack size={15}/></IconButton><IconButton label="Play" onClick={togglePlaying}>{playing ? <I.Pause size={16}/> : <I.Play size={16}/>}</IconButton><IconButton label="Next frame"><I.StepForward size={15}/></IconButton><IconButton label="Go to end"><I.SkipForward size={15}/></IconButton><IconButton label="Loop"><I.Repeat2 size={15}/></IconButton></div><strong>{time.toFixed(2)}s <small>00:{String(Math.round(time * 30)).padStart(2, '0')}</small></strong><div className="timeline-meta"><button>30 FPS⌄</button><span>Duration 12s <small>/ max 30s</small></span><button className="autokey">● Auto Key</button><button><I.Diamond size={13}/> Add Key</button><button>−</button><button>+</button></div></div><div className="timeline-body"><div className="track-list">{tracks.map((track) => <button onClick={() => select(track.toLowerCase().replace(' ', '-'))} className={selected === track.toLowerCase().replace(' ', '-') ? 'selected' : ''} key={track}><I.ChevronDown size={13}/>{track}</button>)}<div className="property-tracks"><span>Position</span><span>Rotation</span><span>Depth</span><span>Motion Path</span></div></div><div className="ruler-area" onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setTime(((event.clientX - rect.left) / rect.width) * 12) }}><div className="ruler">{Array.from({ length: 13 }, (_, i) => <span key={i} style={{ left: `${(i / 12) * 100}%` }}>{i}s</span>)}</div>{Array.from({ length: 6 }, (_, row) => <div className="track-line" style={{ top: `${38 + row * 27}px` }} key={row}>{[14, 37, 64, 82].slice(0, row < 2 ? 3 : 2).map((at) => <button key={at} className="timeline-key" style={{ left: `${at}%` }} onClick={(e) => e.stopPropagation()}>◆</button>)}</div>)}<div className="playhead" style={{ left: `${pct}%` }}><b></b></div></div></div></section> }
+function LayerHierarchy() {
+  const {
+    mode,
+    tab,
+    setTab,
+    sceneLayers,
+    selected,
+    selectedRemainderLayerId,
+    selectedPieces,
+    selectedSketchIds,
+    expanded,
+    toggleExpanded,
+    select,
+    selectLayer,
+    selectRemainder,
+    togglePieceSelection,
+    toggleSketchSelection,
+    toggleLayerVisibility,
+    togglePieceVisibility,
+    toggleSketchVisibility,
+    renameLayer,
+    setLayerColor,
+    setLayerDepth,
+    removeLayer,
+    addLayer,
+    reorderLayer,
+    reorderMode,
+    setReorderMode,
+    setMode,
+    material,
+    setMaterial
+  } = useUIStore()
+  const [dragging, setDragging] = useState<string | null>(null)
+  const atLimit = sceneLayers.length >= 3
+  return (
+    <aside className="sidebar hierarchy-panel">
+      <div className="tabs">
+        {(['layers', 'assets', 'tools'] as const).map((name) => (
+          <button
+            key={name}
+            className={tab === name ? 'active' : ''}
+            onClick={() => setTab(name)}
+          >
+            {name}
+          </button>
+        ))}
+      </div>
+      <div className="sidebar-content">
+        <div className="sidebar-label">
+          LAYERS & OBJECTS <small>{sceneLayers.length} / 3</small>
+        </div>
+        <label className="reorder-mode">
+          Reorder depth
+          <select
+            aria-label="Reorder depth mode"
+            value={reorderMode}
+            onChange={(event) =>
+              setReorderMode(event.target.value as 'cascade' | 'split')
+            }
+          >
+            <option value="cascade">Cascade</option>
+            <option value="split">Split</option>
+          </select>
+        </label>
+        {sceneLayers.map((layer) => {
+          const open = expanded[layer.id] !== false
+          const active =
+            selected === layer.id ||
+            (mode === 'sketch' &&
+              useUIStore.getState().activeSketchLayerId === layer.id)
+          return (
+            <div
+              className={
+                'layer-entry hierarchy-layer ' + (active ? 'active-layer' : '')
+              }
+              data-layer-id={layer.id}
+              key={layer.id}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={() => {
+                if (dragging) reorderLayer(dragging, layer.id)
+                setDragging(null)
+              }}
+            >
+              <div className={'layer-row ' + (active ? 'selected' : '')}>
+                <button
+                  className="hierarchy-chevron"
+                  aria-label={(open ? 'Collapse ' : 'Expand ') + layer.name}
+                  onClick={() => toggleExpanded(layer.id)}
+                >
+                  {open ? (
+                    <I.ChevronDown size={14} />
+                  ) : (
+                    <I.ChevronRight size={14} />
+                  )}
+                </button>
+                <span
+                  className="drag-handle"
+                  draggable
+                  aria-label={'Drag ' + layer.name}
+                  onDragStart={() => setDragging(layer.id)}
+                  onDragEnd={() => setDragging(null)}
+                >
+                  <I.GripVertical size={13} />
+                </span>
+                <span className="thumb" style={{ background: layer.color }} />
+                <input
+                  aria-label={'Rename ' + layer.name}
+                  value={layer.name}
+                  onChange={(event) =>
+                    renameLayer(layer.id, event.target.value)
+                  }
+                  onFocus={() => selectLayer(layer.id)}
+                />
+                <button
+                  className="visibility-layer"
+                  aria-label={(layer.visible ? 'Hide ' : 'Show ') + layer.name}
+                  onClick={() => toggleLayerVisibility(layer.id)}
+                >
+                  {layer.visible ? <I.Eye size={14} /> : <I.EyeOff size={14} />}
+                </button>
+                <input
+                  className="layer-color"
+                  aria-label={'Color for ' + layer.name}
+                  type="color"
+                  value={layer.color}
+                  onChange={(event) =>
+                    setLayerColor(layer.id, event.target.value)
+                  }
+                />
+                <button
+                  className="remove-layer"
+                  aria-label={'Remove ' + layer.name}
+                  onClick={() => removeLayer(layer.id)}
+                >
+                  <I.Trash2 size={13} />
+                </button>
+              </div>
+              {open && (
+                <div className="hierarchy-children">
+                  <button
+                    className={
+                      selectedRemainderLayerId === layer.id
+                        ? 'hierarchy-item selected'
+                        : 'hierarchy-item'
+                    }
+                    onClick={() => selectRemainder(layer.id)}
+                  >
+                    <I.Square size={13} />
+                    <span>Sheet remainder</span>
+                    <small>object</small>
+                  </button>
+                  {layer.components?.map((component) => (
+                    <button
+                      key={component.id}
+                      className={
+                        selected === component.id
+                          ? 'hierarchy-item selected'
+                          : 'hierarchy-item'
+                      }
+                      onClick={() => select(component.id)}
+                    >
+                      <I.Shapes size={13} />
+                      <span>{component.name}</span>
+                      <small>mock</small>
+                    </button>
+                  ))}
+                  {layer.pieces.map((piece) => (
+                    <div className="hierarchy-line" key={piece.id}>
+                      <button
+                        className={
+                          selectedPieces.includes(piece.id)
+                            ? 'hierarchy-item selected'
+                            : 'hierarchy-item'
+                        }
+                        onClick={(event) => {
+                          selectLayer(layer.id)
+                          togglePieceSelection(piece.id, event.shiftKey)
+                        }}
+                      >
+                        <I.Scissors size={13} />
+                        <span>{piece.name}</span>
+                        <small>cutout</small>
+                      </button>
+                      <button
+                        aria-label={
+                          (piece.visible ? 'Hide ' : 'Show ') + piece.name
+                        }
+                        onClick={() =>
+                          togglePieceVisibility(layer.id, piece.id)
+                        }
+                      >
+                        {piece.visible ? (
+                          <I.Eye size={12} />
+                        ) : (
+                          <I.EyeOff size={12} />
+                        )}
+                      </button>
+                    </div>
+                  ))}
+                  {layer.sketches.map((sketch) => (
+                    <div className="hierarchy-line sketch-line" key={sketch.id}>
+                      <button
+                        className={
+                          selectedSketchIds.includes(sketch.id)
+                            ? 'hierarchy-item selected'
+                            : 'hierarchy-item'
+                        }
+                        onClick={(event) => {
+                          selectLayer(layer.id)
+                          if (mode !== 'sketch') setMode('sketch')
+                          toggleSketchSelection(sketch.id, event.shiftKey)
+                        }}
+                      >
+                        <I.PenTool size={13} />
+                        <span>{sketch.name}</span>
+                        <small className={sketch.closed ? 'closed' : 'open'}>
+                          {sketch.closed ? 'closed' : 'open'}
+                        </small>
+                      </button>
+                      <button
+                        aria-label={
+                          (sketch.visible ? 'Hide ' : 'Show ') + sketch.name
+                        }
+                        onClick={() =>
+                          toggleSketchVisibility(layer.id, sketch.id)
+                        }
+                      >
+                        {sketch.visible ? (
+                          <I.Eye size={12} />
+                        ) : (
+                          <I.EyeOff size={12} />
+                        )}
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    className="edit-sketch"
+                    onClick={() => {
+                      selectLayer(layer.id)
+                      setMode('sketch')
+                    }}
+                  >
+                    <I.PencilRuler size={13} /> Edit sketch
+                  </button>
+                </div>
+              )}
+              <label className="depth-editor">
+                <span>Depth</span>
+                <input
+                  aria-label={'Depth for ' + layer.name}
+                  type="number"
+                  value={layer.depth}
+                  onChange={(event) =>
+                    setLayerDepth(layer.id, Number(event.target.value))
+                  }
+                />
+                <small>px</small>
+              </label>
+            </div>
+          )
+        })}
+        <button
+          className="add-layer"
+          disabled={atLimit}
+          onClick={addLayer}
+          title={
+            atLimit
+              ? 'This prototype supports up to three layers.'
+              : 'Add a layer'
+          }
+        >
+          <I.Plus size={15} /> Add Layer <small>{sceneLayers.length} / 3</small>
+        </button>
+        {tab === 'assets' && (
+          <>
+            <div className="sidebar-label auxiliary">PAPER TEXTURES</div>
+            <div className="assets">
+              {assets.map((asset) => (
+                <button
+                  key={asset.name}
+                  className={material === asset.name ? 'selected' : ''}
+                  onClick={() => setMaterial(asset.name)}
+                >
+                  <span style={{ background: asset.color }} />
+                  {asset.name}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+        {tab === 'tools' && (
+          <div className="sidebar-note">
+            <I.ArrowUp size={15} />
+            <span>Tools stay in the bar above the canvas.</span>
+          </div>
+        )}
+      </div>
+    </aside>
+  )
+}
 
-function Dialogs() { const { dialog, setDialog } = useUIStore(); if (!dialog) return null; const title = { new: 'New Project', import: 'Import Artwork', preview: 'Preview', export: 'Export', shortcuts: 'Keyboard Shortcuts', delete: 'Delete selected object?' }[dialog]; return <div className="overlay" role="dialog" aria-modal="true" aria-label={title}><div className="dialog"><div className="dialog-head"><h2>{title}</h2><IconButton label="Close dialog" onClick={() => setDialog(null)}><I.X size={18}/></IconButton></div>{dialog === 'new' && <div className="form"><label>Project name<input defaultValue="Untitled Paper Scene"/></label><div><label>Width<input defaultValue="1920"/></label><label>Height<input defaultValue="1080"/></label></div><div><label>Frame rate<select defaultValue="30"><option>30 fps</option></select></label><label>Duration<input defaultValue="12 seconds"/></label></div><label>Background color<input defaultValue="#EFE7D7"/></label></div>}{dialog === 'import' && <><p>Artwork imports will eventually become editable layer content.</p><div className="dropzone"><I.Upload size={28}/><strong>Drop PNG, JPEG, or SVG here</strong><span>or browse your computer</span></div></>}{dialog === 'preview' && <><div className="preview-scene"><div className="sun"></div><div className="hill back-hill"></div><div className="hill near-hill"></div></div><div className="preview-controls"><button><I.Play size={16}/> Play</button><select><option>1080p</option></select><button>Loop</button></div></>}{dialog === 'export' && <><p>Export is planned for a later implementation phase.</p><div className="export-options">{['WebM', 'MP4', 'GIF', 'PNG Sequence'].map((format) => <button key={format} disabled><I.FileOutput size={20}/><strong>{format}</strong><small>Coming later</small></button>)}</div></>}{dialog === 'shortcuts' && <div className="shortcuts">{[['V','Select'],['H / Space','Pan'],['R','Rotate'],['S','Scale'],['D','Depth'],['P','Pen'],['C','Cut'],['M','Motion Path'],['K','Add Keyframe'],['1 / 2','Compose / Stage']].map(([key, action]) => <div key={key}><kbd>{key}</kbd><span>{action}</span></div>)}</div>}{dialog === 'delete' && <p>This prototype does not modify artwork. Close this confirmation to continue.</p>}<div className="dialog-actions"><button onClick={() => setDialog(null)}>Cancel</button><button className="button accent" onClick={() => setDialog(null)}>{dialog === 'delete' ? 'Keep object' : 'Done'}</button></div></div></div> }
+function ToolButton({
+  name,
+  icon: Icon,
+  hint
+}: {
+  name: EditorTool
+  icon: typeof I.MousePointer2
+  hint: string
+}) {
+  const { tool, setTool } = useUIStore()
+  return (
+    <button
+      title={hint}
+      aria-label={name + ' tool'}
+      className={tool === name ? 'active' : ''}
+      onClick={() => setTool(name)}
+    >
+      <Icon size={16} />
+      <span>{name}</span>
+    </button>
+  )
+}
 
-export function App() { const { setTool, setMode, setDialog, togglePlaying, saveProject, deleteSelectedPieces, selectedPieces, joinSelectedPieces } = useUIStore(); useEffect(() => { const handler = (event: KeyboardEvent) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') { event.preventDefault(); saveProject(); return } const target = event.target as HTMLElement | null; if (target?.matches('input, textarea, select, [contenteditable=true]')) return; if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); return } if (event.key === 'Delete' || event.key === 'Backspace') { if (selectedPieces.length) { event.preventDefault(); deleteSelectedPieces() } else setDialog('delete'); } if (event.key === '1') setMode('compose'); if (event.key === '2') setMode('stage'); if (event.key === ' ') { event.preventDefault(); togglePlaying() } const map: Record<string, string> = { v: 'Select', r: 'Rotate', s: 'Scale', d: 'Depth', p: 'Pen', c: 'Cut Shape', m: 'Motion Path' }; if (event.key.toLowerCase() === 'j') joinSelectedPieces(); if (map[event.key.toLowerCase()]) setTool(map[event.key.toLowerCase()]) }; window.addEventListener('keydown', handler); return () => window.removeEventListener('keydown', handler) }, [setTool, setMode, setDialog, togglePlaying, saveProject, deleteSelectedPieces, selectedPieces, joinSelectedPieces]); return <div className="app"><div className="too-small"><I.Monitor size={28}/><strong>Papercut works best on a larger screen.</strong><span>Please use a viewport at least 1100px wide.</span></div><div className="editor"><Toolbar/><div className="workspace"><Sidebar/><Scene/><Inspector/></div><Timeline/></div><Dialogs/></div> }
+function WorkspaceToolStrip() {
+  const {
+    mode,
+    selectedSketchIds,
+    sceneLayers,
+    activeSketchLayerId,
+    mergeSelectedSketches,
+    closeSelectedContours,
+    cutSelectedContours,
+    deleteSelectedSketches,
+    joinSelectedPieces,
+    selectedPieces
+  } = useUIStore()
+  const selectedSketches =
+    sceneLayers
+      .find((layer) => layer.id === activeSketchLayerId)
+      ?.sketches.filter((object) => selectedSketchIds.includes(object.id)) ?? []
+  const canCut = selectedSketches.some((object) => object.closed)
+  if (mode === 'stage')
+    return (
+      <div className="workspace-tools stage-tools">
+        <span>
+          <I.Orbit size={15} /> Drag the canvas to orbit
+        </span>
+      </div>
+    )
+  return (
+    <div className={'workspace-tools ' + mode}>
+      <div className="tool-group">
+        {editTools.map((item) => (
+          <ToolButton key={item.name} {...item} />
+        ))}
+      </div>
+      {mode === 'compose' && (
+        <>
+          <div className="tool-group">
+            <ToolButton
+              name="Depth"
+              icon={I.Layers3}
+              hint="Drag horizontally to change layer depth"
+            />
+          </div>
+          {selectedPieces.length > 1 && (
+            <button onClick={joinSelectedPieces}>
+              <I.Combine size={15} /> Join pieces
+            </button>
+          )}
+          <span className="workspace-context">
+            Compose objects and layer transforms
+          </span>
+        </>
+      )}
+      {mode === 'sketch' && (
+        <>
+          <div className="tool-group draw-group">
+            {drawTools.map((item) => (
+              <ToolButton key={item.name} {...item} />
+            ))}
+          </div>
+          <div className="tool-group action-group">
+            <button
+              disabled={selectedSketchIds.length < 2}
+              onClick={mergeSelectedSketches}
+            >
+              <I.Combine size={15} /> Merge
+            </button>
+            <button
+              disabled={!selectedSketchIds.length}
+              onClick={closeSelectedContours}
+            >
+              <I.LassoSelect size={15} /> Close contour
+            </button>
+            <button
+              className="cut-command"
+              disabled={!canCut}
+              onClick={cutSelectedContours}
+            >
+              <I.Scissors size={15} /> Cut selected
+            </button>
+            <button
+              disabled={!selectedSketchIds.length}
+              onClick={deleteSelectedSketches}
+              aria-label="Delete selected sketches"
+            >
+              <I.Trash2 size={15} />
+            </button>
+          </div>
+          <span className="workspace-context">
+            {selectedSketchIds.length
+              ? selectedSketchIds.length + ' sketch object selected'
+              : 'Draw on the active layer'}
+          </span>
+        </>
+      )}
+    </div>
+  )
+}
+
+function shapeBounds(shapes: CutShape[]) {
+  const points = shapes.flatMap((shape) => shape.points)
+  if (!points.length) return { x: 0, y: 0, width: 0, height: 0, cx: 0, cy: 0 }
+  const xs = points.map((point) => point.x),
+    ys = points.map((point) => point.y)
+  const x = Math.min(...xs),
+    y = Math.min(...ys),
+    width = Math.max(...xs) - x,
+    height = Math.max(...ys) - y
+  return {
+    x,
+    y,
+    width: Math.max(width, 1),
+    height: Math.max(height, 1),
+    cx: x + width / 2,
+    cy: y + height / 2
+  }
+}
+
+function ShapeGeometry({
+  shape,
+  fill = 'none',
+  stroke = 'currentColor',
+  strokeWidth = 1
+}: {
+  shape: CutShape
+  fill?: string
+  stroke?: string
+  strokeWidth?: number
+}) {
+  const points = shape.points
+  if (!points.length) return null
+  const a = points[0],
+    b = points[points.length - 1] ?? a
+  if (shape.type === 'rect')
+    return (
+      <rect
+        x={Math.min(a.x, b.x)}
+        y={Math.min(a.y, b.y)}
+        width={Math.abs(b.x - a.x)}
+        height={Math.abs(b.y - a.y)}
+        fill={fill}
+        stroke={stroke}
+        strokeWidth={strokeWidth}
+      />
+    )
+  if (shape.type === 'circle')
+    return (
+      <ellipse
+        cx={(a.x + b.x) / 2}
+        cy={(a.y + b.y) / 2}
+        rx={Math.abs(b.x - a.x) / 2}
+        ry={Math.abs(b.y - a.y) / 2}
+        fill={fill}
+        stroke={stroke}
+        strokeWidth={strokeWidth}
+      />
+    )
+  const value = points.map((point) => point.x + ',' + point.y).join(' ')
+  if (shape.closed)
+    return (
+      <polygon
+        points={value}
+        fill={fill}
+        stroke={stroke}
+        strokeWidth={strokeWidth}
+        strokeLinejoin="round"
+      />
+    )
+  return (
+    <polyline
+      points={value}
+      fill="none"
+      stroke={stroke}
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  )
+}
+
+function PaperSurface({ layer }: { layer: Layer }) {
+  const sheet = layer.sheetTransform
+  return (
+    <svg
+      className="paper-sheet"
+      viewBox="0 0 100 100"
+      preserveAspectRatio="none"
+      aria-hidden="true"
+    >
+      <defs>
+        <pattern
+          id={'paper-' + layer.id}
+          width="100"
+          height="100"
+          patternUnits="userSpaceOnUse"
+        >
+          <image
+            href={paperTexture}
+            width="100"
+            height="100"
+            preserveAspectRatio="xMidYMid slice"
+          />
+        </pattern>
+        <mask id={'mask-' + layer.id}>
+          <rect width="100" height="100" fill="white" />
+          {layer.cuts.map((shape) => (
+            <ShapeGeometry
+              key={shape.id}
+              shape={shape}
+              fill="black"
+              stroke="black"
+              strokeWidth={1.5}
+            />
+          ))}
+        </mask>
+      </defs>
+      <g
+        transform={
+          'translate(' +
+          sheet.x +
+          ' ' +
+          sheet.y +
+          ') rotate(' +
+          sheet.rotation +
+          ' 50 50)'
+        }
+        mask={'url(#mask-' + layer.id + ')'}
+      >
+        <rect width="100" height="100" fill={'url(#paper-' + layer.id + ')'} />
+        <rect
+          width="100"
+          height="100"
+          fill={layer.color}
+          opacity=".72"
+          style={{ mixBlendMode: 'multiply' }}
+        />
+      </g>
+    </svg>
+  )
+}
+
+function SelectionBounds({ shapes }: { shapes: CutShape[] }) {
+  const bounds = shapeBounds(shapes)
+  return (
+    <g className="vector-selection">
+      <rect
+        x={bounds.x - 1}
+        y={bounds.y - 1}
+        width={bounds.width + 2}
+        height={bounds.height + 2}
+      />
+      {[
+        [bounds.x - 1, bounds.y - 1],
+        [bounds.x + bounds.width + 1, bounds.y - 1],
+        [bounds.x - 1, bounds.y + bounds.height + 1],
+        [bounds.x + bounds.width + 1, bounds.y + bounds.height + 1]
+      ].map(([x, y], index) => (
+        <rect
+          data-handle="scale"
+          className="vector-handle"
+          key={index}
+          x={x - 0.8}
+          y={y - 0.8}
+          width="1.6"
+          height="1.6"
+        />
+      ))}
+      <line x1={bounds.cx} y1={bounds.y - 1} x2={bounds.cx} y2={bounds.y - 6} />
+      <circle
+        data-handle="rotate"
+        className="rotate-handle"
+        cx={bounds.cx}
+        cy={bounds.y - 7}
+        r="1.2"
+      />
+    </g>
+  )
+}
+
+type Gesture = {
+  kind: string
+  id?: string
+  layerId?: string
+  startClient: { x: number; y: number }
+  startPoint?: SketchPoint
+  startShapes?: CutShape[]
+  transform?: Layer['transform']
+  depth?: number
+}
+
+function Scene() {
+  const {
+    mode,
+    tool,
+    sceneLayers,
+    selected,
+    activeSketchLayerId,
+    selectedSketchIds,
+    selectedPieces,
+    grid,
+    safeFrame,
+    zoom,
+    orbit,
+    setZoom,
+    zoomIn,
+    zoomOut,
+    resetZoom,
+    toggleGrid,
+    toggleSafe,
+    setOrbit,
+    resetOrbit,
+    selectLayer,
+    selectRemainder,
+    moveRemainder,
+    rotateRemainder,
+    selectedRemainderLayerId,
+    toggleSketchSelection,
+    togglePieceSelection,
+    addSketchObject,
+    updateSketchObjectShapes,
+    setLayerTransform,
+    setLayerDepth,
+    movePiece,
+    rotatePiece
+  } = useUIStore()
+  const stageRef = useRef<HTMLDivElement | null>(null)
+  const gesture = useRef<Gesture | null>(null)
+  const [liveShape, setLiveShape] = useState<CutShape | null>(null)
+  const depths = sceneLayers.map((layer) => layer.depth)
+  const depthSpan = depths.length
+    ? Math.max(...depths) - Math.min(...depths)
+    : 0
+  const autoFit =
+    mode === 'stage'
+      ? Math.max(0.46, Math.min(0.86, 900 / (900 + depthSpan * 0.58)))
+      : 1
+  const visibleZoom = zoom * autoFit
+  const activeLayer = sceneLayers.find(
+    (layer) => layer.id === activeSketchLayerId
+  )
+  const drawingType = (
+    {
+      Rectangle: 'rect',
+      Circle: 'circle',
+      Line: 'line',
+      Pen: 'pen',
+      Spline: 'spline'
+    } as Partial<Record<EditorTool, CutShape['type']>>
+  )[tool]
+  const layerPoint = (event: ReactPointerEvent, layerId: string) => {
+    const element = stageRef.current?.querySelector<HTMLElement>(
+      '[data-canvas-layer="' + layerId + '"]'
+    )
+    const rect = element?.getBoundingClientRect()
+    if (!rect) return { x: 0, y: 0 }
+    return {
+      x: Math.max(
+        0,
+        Math.min(100, ((event.clientX - rect.left) / rect.width) * 100)
+      ),
+      y: Math.max(
+        0,
+        Math.min(100, ((event.clientY - rect.top) / rect.height) * 100)
+      )
+    }
+  }
+  const cloneShapes = (shapes: CutShape[]) =>
+    shapes.map((shape) => ({
+      ...shape,
+      points: shape.points.map((point) => ({ ...point }))
+    }))
+  const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement
+    if (mode === 'stage') {
+      gesture.current = {
+        kind: 'orbit',
+        startClient: { x: event.clientX, y: event.clientY },
+        depth: orbit.x,
+        transform: {
+          x: orbit.y,
+          y: 0,
+          rotation: 0,
+          width: 0,
+          height: 0,
+          opacity: 0
+        }
+      }
+      event.currentTarget.setPointerCapture?.(event.pointerId)
+      return
+    }
+    const remainderEl = target.closest<SVGElement>('[data-remainder-id]')
+    const pieceEl = target.closest<SVGElement>('[data-piece-id]')
+    const sketchEl = target.closest<SVGElement>('[data-sketch-id]')
+    const layerEl = target.closest<HTMLElement>('[data-canvas-layer]')
+    if (mode === 'sketch') {
+      const layerId = activeSketchLayerId
+      if (sketchEl) {
+        const id = sketchEl.dataset.sketchId as string
+        const handle =
+          target.closest<SVGElement>('[data-handle]')?.dataset.handle
+        const object = activeLayer?.sketches.find((item) => item.id === id)
+        if (!object) return
+        toggleSketchSelection(id, event.shiftKey)
+        gesture.current = {
+          kind:
+            handle === 'rotate' || tool === 'Rotate'
+              ? 'sketch-rotate'
+              : handle === 'scale' || tool === 'Scale'
+                ? 'sketch-scale'
+                : 'sketch-move',
+          id,
+          layerId,
+          startClient: { x: event.clientX, y: event.clientY },
+          startShapes: cloneShapes(object.shapes)
+        }
+        event.currentTarget.setPointerCapture?.(event.pointerId)
+        return
+      }
+      if (drawingType && activeLayer) {
+        const point = layerPoint(event, layerId)
+        const shape: CutShape = {
+          id: 'shape-live',
+          type: drawingType,
+          points:
+            drawingType === 'pen' || drawingType === 'spline'
+              ? [point]
+              : [point, point],
+          closed: drawingType === 'rect' || drawingType === 'circle'
+        }
+        setLiveShape(shape)
+        gesture.current = {
+          kind: 'draw',
+          layerId,
+          startClient: { x: event.clientX, y: event.clientY },
+          startPoint: point
+        }
+        event.currentTarget.setPointerCapture?.(event.pointerId)
+      }
+      return
+    }
+    if (remainderEl) {
+      const layerId = remainderEl.dataset.remainderId as string
+      selectRemainder(layerId)
+      gesture.current = {
+        kind: tool === 'Rotate' ? 'remainder-rotate' : 'remainder-move',
+        layerId,
+        startClient: { x: event.clientX, y: event.clientY }
+      }
+      event.currentTarget.setPointerCapture?.(event.pointerId)
+      return
+    }
+    if (pieceEl) {
+      const id = pieceEl.dataset.pieceId as string
+      const layerId = pieceEl.dataset.layerId as string
+      togglePieceSelection(id, event.shiftKey)
+      gesture.current = {
+        kind:
+          target.closest('[data-handle="rotate"]') || tool === 'Rotate'
+            ? 'piece-rotate'
+            : 'piece-move',
+        id,
+        layerId,
+        startClient: { x: event.clientX, y: event.clientY }
+      }
+      event.currentTarget.setPointerCapture?.(event.pointerId)
+      return
+    }
+    if (layerEl) {
+      const layerId = layerEl.dataset.canvasLayer as string
+      const layer = sceneLayers.find((item) => item.id === layerId)
+      if (!layer) return
+      selectLayer(layerId)
+      if (tool !== 'Select') {
+        gesture.current = {
+          kind:
+            tool === 'Rotate'
+              ? 'layer-rotate'
+              : tool === 'Scale'
+                ? 'layer-scale'
+                : tool === 'Depth'
+                  ? 'layer-depth'
+                  : 'layer-move',
+          layerId,
+          startClient: { x: event.clientX, y: event.clientY },
+          transform: { ...layer.transform },
+          depth: layer.depth
+        }
+        event.currentTarget.setPointerCapture?.(event.pointerId)
+      }
+    }
+  }
+  const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const current = gesture.current
+    if (!current) return
+    const dx = event.clientX - current.startClient.x,
+      dy = event.clientY - current.startClient.y
+    if (current.kind === 'orbit') {
+      setOrbit({
+        x: Math.max(-72, Math.min(72, (current.depth ?? 0) + dy * 0.35)),
+        y: Math.max(-72, Math.min(72, (current.transform?.x ?? 0) + dx * 0.35))
+      })
+      return
+    }
+    if (
+      current.kind === 'draw' &&
+      current.layerId &&
+      current.startPoint &&
+      liveShape
+    ) {
+      const next = layerPoint(event, current.layerId)
+      if (liveShape.type === 'pen' || liveShape.type === 'spline') {
+        const last = liveShape.points[liveShape.points.length - 1]
+        if (Math.hypot(last.x - next.x, last.y - next.y) > 0.7)
+          setLiveShape({ ...liveShape, points: [...liveShape.points, next] })
+      } else setLiveShape({ ...liveShape, points: [current.startPoint, next] })
+      return
+    }
+    if (
+      current.kind.startsWith('sketch') &&
+      current.id &&
+      current.layerId &&
+      current.startShapes
+    ) {
+      const element = stageRef.current?.querySelector<HTMLElement>(
+        '[data-canvas-layer="' + current.layerId + '"]'
+      )
+      if (!element) return
+      const px = (dx / element.clientWidth) * 100,
+        py = (dy / element.clientHeight) * 100
+      let shapes = cloneShapes(current.startShapes)
+      if (current.kind === 'sketch-move')
+        shapes = shapes.map((shape) => ({
+          ...shape,
+          points: shape.points.map((point) => ({
+            x: point.x + px,
+            y: point.y + py
+          }))
+        }))
+      if (current.kind === 'sketch-scale') {
+        const bounds = shapeBounds(shapes)
+        const sx = Math.max(0.08, (bounds.width + px) / bounds.width),
+          sy = Math.max(0.08, (bounds.height + py) / bounds.height)
+        shapes = shapes.map((shape) => ({
+          ...shape,
+          points: shape.points.map((point) => ({
+            x: bounds.x + (point.x - bounds.x) * sx,
+            y: bounds.y + (point.y - bounds.y) * sy
+          }))
+        }))
+      }
+      if (current.kind === 'sketch-rotate') {
+        const bounds = shapeBounds(shapes),
+          radians = dx * 0.012
+        shapes = shapes.map((shape) => ({
+          ...shape,
+          points: shape.points.map((point) => ({
+            x:
+              bounds.cx +
+              (point.x - bounds.cx) * Math.cos(radians) -
+              (point.y - bounds.cy) * Math.sin(radians),
+            y:
+              bounds.cy +
+              (point.x - bounds.cx) * Math.sin(radians) +
+              (point.y - bounds.cy) * Math.cos(radians)
+          }))
+        }))
+      }
+      updateSketchObjectShapes(current.layerId, current.id, shapes)
+      return
+    }
+    if (current.kind === 'remainder-move' && current.layerId) {
+      const element = stageRef.current?.querySelector<HTMLElement>(
+        '[data-canvas-layer="' + current.layerId + '"]'
+      )
+      if (element) {
+        moveRemainder(
+          current.layerId,
+          (dx / element.clientWidth) * 100,
+          (dy / element.clientHeight) * 100
+        )
+        current.startClient = { x: event.clientX, y: event.clientY }
+      }
+    }
+    if (current.kind === 'remainder-rotate' && current.layerId) {
+      rotateRemainder(current.layerId, dx * 0.45)
+      current.startClient.x = event.clientX
+    }
+    if (current.kind === 'piece-move' && current.id && current.layerId) {
+      const element = stageRef.current?.querySelector<HTMLElement>(
+        '[data-canvas-layer="' + current.layerId + '"]'
+      )
+      if (element) {
+        movePiece(
+          current.id,
+          (dx / element.clientWidth) * 100,
+          (dy / element.clientHeight) * 100
+        )
+        current.startClient = { x: event.clientX, y: event.clientY }
+      }
+    }
+    if (current.kind === 'piece-rotate' && current.id) {
+      rotatePiece(current.id, dx * 0.45)
+      current.startClient.x = event.clientX
+    }
+    if (current.layerId && current.transform) {
+      if (current.kind === 'layer-move') {
+        setLayerTransform(current.layerId, 'x', current.transform.x + dx)
+        setLayerTransform(current.layerId, 'y', current.transform.y + dy)
+      }
+      if (current.kind === 'layer-rotate')
+        setLayerTransform(
+          current.layerId,
+          'rotation',
+          current.transform.rotation + dx * 0.45
+        )
+      if (current.kind === 'layer-scale') {
+        setLayerTransform(
+          current.layerId,
+          'width',
+          current.transform.width + dx * 0.15
+        )
+        setLayerTransform(
+          current.layerId,
+          'height',
+          current.transform.height + dy * 0.15
+        )
+      }
+      if (current.kind === 'layer-depth')
+        setLayerDepth(current.layerId, (current.depth ?? 0) + dx * 2)
+    }
+  }
+  const onPointerUp = () => {
+    if (
+      gesture.current?.kind === 'draw' &&
+      gesture.current.layerId &&
+      liveShape
+    ) {
+      const enough =
+        liveShape.points.length > 1 &&
+        Math.hypot(
+          liveShape.points[0].x -
+            liveShape.points[liveShape.points.length - 1].x,
+          liveShape.points[0].y -
+            liveShape.points[liveShape.points.length - 1].y
+        ) > 0.8
+      if (enough || liveShape.points.length > 3) {
+        const shape = { ...liveShape, id: 'shape-' + Date.now() }
+        const object: SketchObject = {
+          id: 'sketch-' + Date.now(),
+          name:
+            (shape.type === 'circle'
+              ? 'Ellipse'
+              : shape.type[0].toUpperCase() + shape.type.slice(1)) + ' contour',
+          shapes: [shape],
+          closed: shape.closed,
+          visible: true
+        }
+        addSketchObject(gesture.current.layerId, object)
+      }
+    }
+    setLiveShape(null)
+    gesture.current = null
+  }
+  const renderSketch = (object: SketchObject, live = false) => (
+    <g
+      key={object.id}
+      data-sketch-id={live ? undefined : object.id}
+      className={
+        'sketch-object ' +
+        (live ? 'live' : '') +
+        (selectedSketchIds.includes(object.id) ? ' selected' : '')
+      }
+    >
+      {object.shapes.map((shape) => (
+        <ShapeGeometry
+          key={shape.id}
+          shape={shape}
+          fill={shape.closed ? 'rgba(232,139,83,.12)' : 'none'}
+          stroke={live ? '#ffbd8d' : '#e88750'}
+          strokeWidth={1.2}
+        />
+      ))}
+      {!live && selectedSketchIds.includes(object.id) && (
+        <SelectionBounds shapes={object.shapes} />
+      )}
+    </g>
+  )
+  return (
+    <main className={'viewport layer-viewport ' + mode}>
+      <WorkspaceToolStrip />
+      <div className="viewport-controls">
+        <button className={grid ? 'active' : ''} onClick={toggleGrid}>
+          <I.Grid3X3 size={15} /> Grid
+        </button>
+        <button className={safeFrame ? 'active' : ''} onClick={toggleSafe}>
+          <I.RectangleHorizontal size={15} /> Safe
+        </button>
+        {mode === 'stage' && (
+          <button onClick={resetOrbit}>
+            <I.Rotate3D size={15} /> Reset
+          </button>
+        )}
+        <button aria-label="Zoom out" onClick={zoomOut}>
+          <I.Minus size={15} />
+        </button>
+        <span>{Math.round(visibleZoom * 100)}%</span>
+        <button aria-label="Zoom in" onClick={zoomIn}>
+          <I.Plus size={15} />
+        </button>
+        <button onClick={resetZoom}>Fit</button>
+      </div>
+      <div className="tool-hint">
+        <I.MousePointer2 size={14} />
+        {mode === 'sketch'
+          ? 'Sketch mode · active layer is editable; context layers are frozen'
+          : mode === 'stage'
+            ? 'Stage · drag to orbit'
+            : tool + ' · select or transform paper objects'}
+      </div>
+      <div
+        ref={stageRef}
+        className={'layer-stage ' + (grid ? 'with-grid' : '')}
+        onWheel={(event) => {
+          event.preventDefault()
+          setZoom(zoom + (event.deltaY < 0 ? 0.08 : -0.08))
+        }}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+      >
+        <div
+          className="stage-orbit"
+          style={{
+            transform:
+              mode === 'stage'
+                ? 'scale(' +
+                  visibleZoom +
+                  ') rotateX(' +
+                  orbit.x +
+                  'deg) rotateY(' +
+                  orbit.y +
+                  'deg)'
+                : 'scale(' + zoom + ')'
+          }}
+        >
+          {sceneLayers
+            .filter((layer) => layer.visible)
+            .slice()
+            .sort((a, b) => a.depth - b.depth)
+            .map((layer) => {
+              const transform = layer.transform
+              const contextLayer =
+                mode === 'sketch' && layer.id !== activeSketchLayerId
+              return (
+                <div
+                  data-canvas-layer={layer.id}
+                  key={layer.id}
+                  className={
+                    'paper-layer ' +
+                    (selected === layer.id ? 'selected ' : '') +
+                    (contextLayer ? 'context-layer' : '')
+                  }
+                  style={{
+                    width: transform.width + '%',
+                    height: transform.height + '%',
+                    opacity: contextLayer ? 0.18 : transform.opacity / 100,
+                    pointerEvents: contextLayer ? 'none' : 'auto',
+                    transform:
+                      mode === 'stage'
+                        ? 'translate(-50%, -50%) translate3d(' +
+                          transform.x +
+                          'px,' +
+                          transform.y +
+                          'px,' +
+                          layer.depth +
+                          'px) rotateZ(' +
+                          transform.rotation +
+                          'deg)'
+                        : 'translate(-50%, -50%) translate(' +
+                          transform.x +
+                          'px,' +
+                          transform.y +
+                          'px) rotate(' +
+                          transform.rotation +
+                          'deg)'
+                  }}
+                >
+                  <PaperSurface layer={layer} />
+                  <svg
+                    className="object-overlay"
+                    viewBox="0 0 100 100"
+                    preserveAspectRatio="none"
+                  >
+                    <defs>
+                      <pattern
+                        id={'object-paper-' + layer.id}
+                        width="100"
+                        height="100"
+                        patternUnits="userSpaceOnUse"
+                      >
+                        <image
+                          href={paperTexture}
+                          width="100"
+                          height="100"
+                          preserveAspectRatio="xMidYMid slice"
+                        />
+                      </pattern>
+                    </defs>
+                    <g
+                      data-remainder-id={layer.id}
+                      className={
+                        'sheet-hit ' +
+                        (selectedRemainderLayerId === layer.id
+                          ? 'selected'
+                          : '')
+                      }
+                      transform={
+                        'translate(' +
+                        layer.sheetTransform.x +
+                        ' ' +
+                        layer.sheetTransform.y +
+                        ') rotate(' +
+                        layer.sheetTransform.rotation +
+                        ' 50 50)'
+                      }
+                    >
+                      <rect width="100" height="100" fill="transparent" />
+                      {selectedRemainderLayerId === layer.id && (
+                        <SelectionBounds
+                          shapes={[
+                            {
+                              id: 'sheet-bounds',
+                              type: 'rect',
+                              closed: true,
+                              points: [
+                                { x: 0, y: 0 },
+                                { x: 100, y: 100 }
+                              ]
+                            }
+                          ]}
+                        />
+                      )}
+                    </g>
+                    {layer.pieces
+                      .filter((piece) => piece.visible)
+                      .map((piece) => {
+                        const bounds = shapeBounds(piece.shapes)
+                        return (
+                          <g
+                            data-piece-id={piece.id}
+                            data-layer-id={layer.id}
+                            key={piece.id}
+                            className={
+                              'cut-object ' +
+                              (selectedPieces.includes(piece.id)
+                                ? 'selected'
+                                : '')
+                            }
+                            transform={
+                              'translate(' +
+                              piece.x +
+                              ' ' +
+                              piece.y +
+                              ') rotate(' +
+                              piece.rotation +
+                              ' ' +
+                              bounds.cx +
+                              ' ' +
+                              bounds.cy +
+                              ')'
+                            }
+                          >
+                            {piece.shapes.map((shape) => (
+                              <g key={shape.id}>
+                                <ShapeGeometry
+                                  shape={shape}
+                                  fill={'url(#object-paper-' + layer.id + ')'}
+                                  stroke="rgba(255,255,255,.12)"
+                                  strokeWidth={0.25}
+                                />
+                                <g
+                                  opacity=".66"
+                                  style={{ mixBlendMode: 'multiply' }}
+                                >
+                                  <ShapeGeometry
+                                    shape={shape}
+                                    fill={layer.color}
+                                    stroke="none"
+                                    strokeWidth={0}
+                                  />
+                                </g>
+                              </g>
+                            ))}
+                            {selectedPieces.includes(piece.id) && (
+                              <SelectionBounds shapes={piece.shapes} />
+                            )}
+                          </g>
+                        )
+                      })}
+                    {mode === 'sketch' &&
+                      layer.id === activeSketchLayerId &&
+                      layer.sketches
+                        .filter((object) => object.visible)
+                        .map((object) => renderSketch(object))}
+                    {mode === 'sketch' &&
+                      layer.id === activeSketchLayerId &&
+                      liveShape &&
+                      renderSketch(
+                        {
+                          id: 'live',
+                          name: 'Drawing',
+                          shapes: [liveShape],
+                          closed: liveShape.closed,
+                          visible: true
+                        },
+                        true
+                      )}
+                  </svg>
+                  {mode === 'stage' && <em>{layer.depth}px</em>}
+                </div>
+              )
+            })}
+        </div>
+        {safeFrame && <div className="safe-frame" />}
+        {mode === 'stage' && <div className="stage-grid" />}
+      </div>
+    </main>
+  )
+}
+
+function Inspector() {
+  const { selected, sceneLayers, material, setLayerTransform, setLayerDepth } =
+    useUIStore()
+  const layer = sceneLayers.find((item) => item.id === selected)
+  const transform = layer?.transform
+  const update = (
+    field: keyof NonNullable<typeof transform>,
+    value: string
+  ) => {
+    if (layer && value.trim() !== '' && Number.isFinite(Number(value)))
+      setLayerTransform(layer.id, field, Number(value))
+  }
+  return (
+    <aside className="inspector">
+      <div className="inspector-title">
+        <span>INSPECTOR</span>
+        <strong>{layer?.name ?? 'Object selection'}</strong>
+      </div>
+      <Section id="transform" title="Transform">
+        <div className="properties">
+          <Property
+            key={(layer?.id ?? selected) + '-x'}
+            label="X"
+            value={transform?.x ?? 0}
+            keyId="x"
+            onChange={(value) => update('x', value)}
+          />
+          <Property
+            key={(layer?.id ?? selected) + '-y'}
+            label="Y"
+            value={transform?.y ?? 0}
+            keyId="y"
+            onChange={(value) => update('y', value)}
+          />
+          <Property
+            key={(layer?.id ?? selected) + '-depth'}
+            label="Depth"
+            value={layer?.depth ?? 0}
+            keyId="depth"
+            onChange={(value) => {
+              if (
+                layer &&
+                value.trim() !== '' &&
+                Number.isFinite(Number(value))
+              )
+                setLayerDepth(layer.id, Number(value))
+            }}
+          />
+          <Property
+            key={(layer?.id ?? selected) + '-rotation'}
+            label="Rotation"
+            value={transform?.rotation ?? 0}
+            keyId="rotation"
+            onChange={(value) => update('rotation', value)}
+          />
+          <Property
+            key={(layer?.id ?? selected) + '-width'}
+            label="Width"
+            value={transform?.width ?? 100}
+            onChange={(value) => update('width', value)}
+          />
+          <Property
+            key={(layer?.id ?? selected) + '-height'}
+            label="Height"
+            value={transform?.height ?? 100}
+            onChange={(value) => update('height', value)}
+          />
+          <Property
+            key={(layer?.id ?? selected) + '-opacity'}
+            label="Opacity"
+            value={transform?.opacity ?? 100}
+            onChange={(value) => update('opacity', value)}
+          />
+        </div>
+      </Section>
+      <Section id="layer" title="Layer">
+        <div className="properties">
+          <Property
+            label="Logical layer"
+            value={layer?.name ?? 'Select a layer'}
+          />
+          <Property label="Local depth" value={layer?.depth ?? 0} />
+        </div>
+      </Section>
+      <Section id="material" title="Material">
+        <div className="material-preview">
+          <span />
+          <div>
+            <strong>{material}</strong>
+            <small>Paper PBR · color tint</small>
+          </div>
+        </div>
+      </Section>
+    </aside>
+  )
+}
+
+function Timeline() {
+  const { time, setTime, playing, togglePlaying, selected, select } =
+    useUIStore()
+  return (
+    <section className="timeline">
+      <div className="resize-handle" />
+      <div className="timeline-top">
+        <div className="transport">
+          <IconButton label="Go to start">
+            <I.SkipBack size={15} />
+          </IconButton>
+          <IconButton label="Previous frame">
+            <I.StepBack size={15} />
+          </IconButton>
+          <IconButton label="Play" onClick={togglePlaying}>
+            {playing ? <I.Pause size={16} /> : <I.Play size={16} />}
+          </IconButton>
+          <IconButton label="Next frame">
+            <I.StepForward size={15} />
+          </IconButton>
+          <IconButton label="Go to end">
+            <I.SkipForward size={15} />
+          </IconButton>
+        </div>
+        <strong>{time.toFixed(2)}s</strong>
+        <div className="timeline-meta">
+          <span>30 FPS</span>
+          <span>
+            Duration 12s <small>/ max 30s</small>
+          </span>
+        </div>
+      </div>
+      <div className="timeline-body">
+        <div className="track-list">
+          {tracks.map((track) => (
+            <button
+              key={track}
+              className={
+                selected === track.toLowerCase().replace(' ', '-')
+                  ? 'selected'
+                  : ''
+              }
+              onClick={() => select(track.toLowerCase().replace(' ', '-'))}
+            >
+              <I.ChevronRight size={13} />
+              {track}
+            </button>
+          ))}
+        </div>
+        <div
+          className="ruler-area"
+          onClick={(event) => {
+            const rect = event.currentTarget.getBoundingClientRect()
+            setTime(((event.clientX - rect.left) / rect.width) * 12)
+          }}
+        >
+          <div className="ruler">
+            {Array.from({ length: 13 }, (_, index) => (
+              <span key={index} style={{ left: (index / 12) * 100 + '%' }}>
+                {index}s
+              </span>
+            ))}
+          </div>
+          <div className="playhead" style={{ left: (time / 12) * 100 + '%' }}>
+            <b />
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function Dialog({ children }: { children: ReactNode }) {
+  const { dialog, setDialog } = useUIStore()
+  if (!dialog) return null
+  const title = {
+    new: 'New Project',
+    import: 'Import Artwork',
+    preview: 'Preview',
+    export: 'Export',
+    shortcuts: 'Keyboard Shortcuts',
+    delete: 'Delete selected object?'
+  }[dialog]
+  return (
+    <div className="overlay" role="dialog" aria-modal="true" aria-label={title}>
+      <div className="dialog">
+        <div className="dialog-head">
+          <h2>{title}</h2>
+          <IconButton label="Close dialog" onClick={() => setDialog(null)}>
+            <I.X size={18} />
+          </IconButton>
+        </div>
+        {children}
+        <div className="dialog-actions">
+          <button onClick={() => setDialog(null)}>Close</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+function Dialogs() {
+  const { dialog } = useUIStore()
+  if (!dialog) return null
+  if (dialog === 'preview')
+    return (
+      <Dialog>
+        <div className="preview-scene">
+          <div className="sun" />
+          <div className="hill back-hill" />
+          <div className="hill near-hill" />
+        </div>
+      </Dialog>
+    )
+  if (dialog === 'export')
+    return (
+      <Dialog>
+        <p>Export formats are coming in a later phase.</p>
+      </Dialog>
+    )
+  if (dialog === 'shortcuts')
+    return (
+      <Dialog>
+        <div className="shortcuts">
+          <div>
+            <kbd>1 / 2 / 3</kbd>
+            <span>Compose / Sketch / Stage</span>
+          </div>
+          <div>
+            <kbd>V</kbd>
+            <span>Select</span>
+          </div>
+          <div>
+            <kbd>R</kbd>
+            <span>Rotate</span>
+          </div>
+          <div>
+            <kbd>S</kbd>
+            <span>Scale</span>
+          </div>
+          <div>
+            <kbd>C</kbd>
+            <span>Cut selected contour</span>
+          </div>
+        </div>
+      </Dialog>
+    )
+  return (
+    <Dialog>
+      <EmptyState
+        title="Prototype dialog"
+        text="This workflow is represented as UI only."
+      />
+    </Dialog>
+  )
+}
+
+export function App() {
+  const {
+    mode,
+    setMode,
+    setTool,
+    saveProject,
+    selectedPieces,
+    selectedSketchIds,
+    deleteSelectedPieces,
+    deleteSelectedSketches,
+    cutSelectedContours,
+    joinSelectedPieces,
+    setDialog,
+    togglePlaying
+  } = useUIStore()
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault()
+        saveProject()
+        return
+      }
+      if (target?.matches('input, textarea, select, [contenteditable=true]'))
+        return
+      if (event.key === 'Backspace' || event.key === 'Delete') {
+        event.preventDefault()
+        if (mode === 'sketch' && selectedSketchIds.length)
+          deleteSelectedSketches()
+        else if (selectedPieces.length) deleteSelectedPieces()
+        else setDialog('delete')
+      }
+      if (event.key === '1') setMode('compose')
+      if (event.key === '2') setMode('sketch')
+      if (event.key === '3') setMode('stage')
+      if (event.key === ' ') {
+        event.preventDefault()
+        togglePlaying()
+      }
+      const shortcuts: Record<string, EditorTool> = {
+        v: 'Select',
+        r: 'Rotate',
+        s: 'Scale',
+        d: 'Depth',
+        p: 'Pen'
+      }
+      if (shortcuts[event.key.toLowerCase()])
+        setTool(shortcuts[event.key.toLowerCase()])
+      if (event.key.toLowerCase() === 'c' && mode === 'sketch')
+        cutSelectedContours()
+      if (event.key.toLowerCase() === 'j') joinSelectedPieces()
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [
+    mode,
+    selectedPieces,
+    selectedSketchIds,
+    saveProject,
+    deleteSelectedPieces,
+    deleteSelectedSketches,
+    setDialog,
+    setMode,
+    setTool,
+    togglePlaying,
+    cutSelectedContours,
+    joinSelectedPieces
+  ])
+  return (
+    <div className="app">
+      <div className="too-small">
+        <I.Monitor size={28} />
+        <strong>Papercut works best on a larger screen.</strong>
+        <span>Please use a viewport at least 1100px wide.</span>
+      </div>
+      <div className="editor">
+        <TopToolbar />
+        <div className="workspace">
+          <LayerHierarchy />
+          <Scene />
+          <Inspector />
+        </div>
+        <Timeline />
+      </div>
+      <Dialogs />
+    </div>
+  )
+}
