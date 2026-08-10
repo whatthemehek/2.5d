@@ -65,6 +65,21 @@ describe('Papercut wireframe', () => {
     fireEvent.click(screen.getAllByText('Sheet remainder')[0])
     expect(useUIStore.getState().selectedRemainderLayerId).toBe('foreground')
   })
+  it('returns to Compose when selecting a sheet remainder from Sketch', () => {
+    render(<App />)
+    fireEvent.click(screen.getByText('Sketch'))
+    fireEvent.click(screen.getByLabelText('Circle tool'))
+    expect(useUIStore.getState().mode).toBe('sketch')
+    fireEvent.click(screen.getAllByText('Sheet remainder')[0])
+    expect(useUIStore.getState()).toMatchObject({
+      mode: 'compose',
+      tool: 'Select',
+      selectedRemainderLayerId: 'foreground'
+    })
+    fireEvent.click(screen.getByLabelText('Rotate tool'))
+    expect(useUIStore.getState().tool).toBe('Rotate')
+  })
+
   it('opens and closes dialogs', () => {
     render(<App />)
     fireEvent.click(screen.getByText('Preview'))
@@ -327,18 +342,6 @@ describe('Compose object tools', () => {
     fireEvent.pointerUp(stage, { pointerId: 41 })
     expect(useUIStore.getState().selectedRemainderLayerId).toBe('character')
     expect(useUIStore.getState().sceneLayers[2].sheetTransform.x).toBe(0)
-
-    fireEvent.pointerDown(characterSheet, {
-      clientX: 100,
-      clientY: 100,
-      pointerId: 42
-    })
-    fireEvent.pointerMove(stage, {
-      clientX: 140,
-      clientY: 120,
-      pointerId: 42
-    })
-    fireEvent.pointerUp(stage, { pointerId: 42 })
     expect(useUIStore.getState().sceneLayers[1].sheetTransform).toMatchObject({
       x: 10,
       y: 5

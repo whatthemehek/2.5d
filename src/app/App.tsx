@@ -887,6 +887,100 @@ function Scene() {
     const clickedLayerId =
       pieceEl?.dataset.layerId ?? layerEl?.dataset.canvasLayer
     const lockedLayerId = resolveInteractionLayerId(currentState)
+    const explicitTransform =
+      activeTool === 'Move' ||
+      activeTool === 'Rotate' ||
+      activeTool === 'Scale' ||
+      activeTool === 'Depth'
+    if (explicitTransform) {
+      const selectedSketchId =
+        currentState.selectedSketchIds.length === 1
+          ? currentState.selectedSketchIds[0]
+          : null
+      const selectedPieceId =
+        currentState.selectedPieces.length === 1
+          ? currentState.selectedPieces[0]
+          : null
+      const selectedSketchLayer = selectedSketchId
+        ? currentState.sceneLayers.find((layer) =>
+            layer.sketches.some((sketch) => sketch.id === selectedSketchId)
+          )
+        : undefined
+      const selectedPieceLayer = selectedPieceId
+        ? currentState.sceneLayers.find((layer) =>
+            layer.pieces.some((piece) => piece.id === selectedPieceId)
+          )
+        : undefined
+      const selectedLayer = currentState.sceneLayers.find(
+        (layer) => layer.id === lockedLayerId
+      )
+
+      if (selectedSketchId && selectedSketchLayer && activeTool !== 'Depth') {
+        const object = selectedSketchLayer.sketches.find(
+          (sketch) => sketch.id === selectedSketchId
+        )
+        if (object)
+          gesture.current = {
+            kind:
+              activeTool === 'Rotate'
+                ? 'sketch-rotate'
+                : activeTool === 'Scale'
+                  ? 'sketch-scale'
+                  : 'sketch-move',
+            id: selectedSketchId,
+            layerId: selectedSketchLayer.id,
+            startClient: { x: event.clientX, y: event.clientY },
+            startShapes: cloneShapes(object.shapes)
+          }
+      } else if (selectedPieceId && selectedPieceLayer) {
+        gesture.current = {
+          kind:
+            activeTool === 'Rotate'
+              ? 'piece-rotate'
+              : activeTool === 'Scale'
+                ? 'piece-scale'
+                : activeTool === 'Depth'
+                  ? 'piece-depth'
+                  : 'piece-move',
+          id: selectedPieceId,
+          layerId: selectedPieceLayer.id,
+          startClient: { x: event.clientX, y: event.clientY }
+        }
+      } else if (currentState.selectedRemainderLayerId) {
+        gesture.current = {
+          kind:
+            activeTool === 'Rotate'
+              ? 'remainder-rotate'
+              : activeTool === 'Scale'
+                ? 'remainder-scale'
+                : activeTool === 'Depth'
+                  ? 'remainder-depth'
+                  : 'remainder-move',
+          layerId: currentState.selectedRemainderLayerId,
+          startClient: { x: event.clientX, y: event.clientY }
+        }
+      } else if (selectedLayer) {
+        gesture.current = {
+          kind:
+            activeTool === 'Rotate'
+              ? 'layer-rotate'
+              : activeTool === 'Scale'
+                ? 'layer-scale'
+                : activeTool === 'Depth'
+                  ? 'layer-depth'
+                  : 'layer-move',
+          layerId: selectedLayer.id,
+          startClient: { x: event.clientX, y: event.clientY },
+          transform: { ...selectedLayer.transform },
+          depth: selectedLayer.depth
+        }
+      }
+
+      if (gesture.current) {
+        event.currentTarget.setPointerCapture?.(event.pointerId)
+        return
+      }
+    }
     if (clickedLayerId && lockedLayerId && clickedLayerId !== lockedLayerId)
       return
 

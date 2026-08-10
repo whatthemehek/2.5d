@@ -209,6 +209,8 @@ export const useUIStore = create<UIState>((set, get) => ({
     }),
   selectRemainder: (layerId) =>
     set({
+      mode: 'compose',
+      tool: 'Select',
       selected: layerId,
       activeSketchLayerId: layerId,
       selectedRemainderLayerId: layerId,
@@ -221,6 +223,8 @@ export const useUIStore = create<UIState>((set, get) => ({
         layer.pieces.some((piece) => piece.id === id)
       )?.id
       return {
+        mode: 'compose' as const,
+        tool: 'Select' as const,
         selectedPieces: additive
           ? state.selectedPieces.includes(id)
             ? state.selectedPieces.filter((item) => item !== id)
