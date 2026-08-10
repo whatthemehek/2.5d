@@ -30,6 +30,9 @@ export type CutPiece = {
   x: number
   y: number
   rotation: number
+  scaleX: number
+  scaleY: number
+  depthOffset: number
   visible: boolean
 }
 export type Layer = {
@@ -39,8 +42,14 @@ export type Layer = {
   color: string
   visible: boolean
   transform: LayerTransform
-  sheetTransform: { x: number; y: number; rotation: number }
-  components?: { id: string; name: string }[]
+  sheetTransform: {
+    x: number
+    y: number
+    rotation: number
+    scaleX: number
+    scaleY: number
+    depthOffset: number
+  }
   sketches: SketchObject[]
   cuts: CutShape[]
   pieces: CutPiece[]
@@ -54,7 +63,14 @@ const transform = (width: number, height: number): LayerTransform => ({
   height,
   opacity: 100
 })
-const sheetTransform = () => ({ x: 0, y: 0, rotation: 0 })
+const sheetTransform = () => ({
+  x: 0,
+  y: 0,
+  rotation: 0,
+  scaleX: 1,
+  scaleY: 1,
+  depthOffset: 0
+})
 
 export const layers: Layer[] = [
   {
@@ -77,12 +93,6 @@ export const layers: Layer[] = [
     visible: true,
     transform: transform(50, 50),
     sheetTransform: sheetTransform(),
-    components: [
-      { id: 'head', name: 'Head' },
-      { id: 'body', name: 'Body' },
-      { id: 'left-arm', name: 'Left Arm' },
-      { id: 'right-arm', name: 'Right Arm' }
-    ],
     sketches: [],
     cuts: [],
     pieces: []
@@ -108,13 +118,4 @@ export const assets = [
   { name: 'Cardboard', color: '#9b704b' },
   { name: 'Plywood', color: '#c59a68' },
   { name: 'Red construction', color: '#bd4e42' }
-]
-
-export const tracks = [
-  'Camera',
-  'Foreground',
-  'Character',
-  'Left Arm',
-  'Right Arm',
-  'Background'
 ]

@@ -8,7 +8,6 @@ import {
 import * as I from 'lucide-react'
 import {
   assets,
-  tracks,
   type CutShape,
   type Layer,
   type SketchObject,
@@ -127,13 +126,13 @@ function LayerHierarchy() {
     selectedSketchIds,
     expanded,
     toggleExpanded,
-    select,
     selectLayer,
     selectRemainder,
     togglePieceSelection,
     toggleSketchSelection,
     toggleLayerVisibility,
     togglePieceVisibility,
+    deletePiece,
     toggleSketchVisibility,
     renameLayer,
     setLayerColor,
@@ -266,21 +265,6 @@ function LayerHierarchy() {
                     <span>Sheet remainder</span>
                     <small>object</small>
                   </button>
-                  {layer.components?.map((component) => (
-                    <button
-                      key={component.id}
-                      className={
-                        selected === component.id
-                          ? 'hierarchy-item selected'
-                          : 'hierarchy-item'
-                      }
-                      onClick={() => select(component.id)}
-                    >
-                      <I.Shapes size={13} />
-                      <span>{component.name}</span>
-                      <small>mock</small>
-                    </button>
-                  ))}
                   {layer.pieces.map((piece) => (
                     <div className="hierarchy-line" key={piece.id}>
                       <button
@@ -296,7 +280,7 @@ function LayerHierarchy() {
                       >
                         <I.Scissors size={13} />
                         <span>{piece.name}</span>
-                        <small>cutout</small>
+                        <small>cutout / z {piece.depthOffset}</small>
                       </button>
                       <button
                         aria-label={
@@ -311,6 +295,13 @@ function LayerHierarchy() {
                         ) : (
                           <I.EyeOff size={12} />
                         )}
+                      </button>
+                      <button
+                        className="hierarchy-delete"
+                        aria-label={'Delete ' + piece.name}
+                        onClick={() => deletePiece(piece.id)}
+                      >
+                        <I.Trash2 size={12} />
                       </button>
                     </div>
                   ))}
@@ -662,9 +653,21 @@ function PaperSurface({ layer }: { layer: Layer }) {
           sheet.y +
           ') rotate(' +
           sheet.rotation +
-          ' 50 50)'
+          ' 50 50) translate(50 50) scale(' +
+          sheet.scaleX +
+          ' ' +
+          sheet.scaleY +
+          ') translate(-50 -50)'
         }
         mask={'url(#mask-' + layer.id + ')'}
+        style={{
+          filter:
+            'drop-shadow(0 ' +
+            Math.max(0, sheet.depthOffset / 8) +
+            'px ' +
+            Math.max(1, Math.abs(sheet.depthOffset) / 12) +
+            'px rgba(0,0,0,.38))'
+        }}
       >
         <rect width="100" height="100" fill={'url(#paper-' + layer.id + ')'} />
         <rect
@@ -750,9 +753,10 @@ function Scene() {
     setOrbit,
     resetOrbit,
     selectLayer,
-    selectRemainder,
     moveRemainder,
     rotateRemainder,
+    scaleRemainder,
+    changeRemainderDepth,
     selectedRemainderLayerId,
     toggleSketchSelection,
     togglePieceSelection,
@@ -761,7 +765,9 @@ function Scene() {
     setLayerTransform,
     setLayerDepth,
     movePiece,
-    rotatePiece
+    rotatePiece,
+    scalePiece,
+    changePieceDepth
   } = useUIStore()
   const stageRef = useRef<HTMLDivElement | null>(null)
   const gesture = useRef<Gesture | null>(null)
@@ -811,6 +817,8 @@ function Scene() {
     }))
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement
+    const currentState = useUIStore.getState()
+    const activeTool = currentState.tool
     if (mode === 'stage') {
       gesture.current = {
         kind: 'orbit',
@@ -843,9 +851,9 @@ function Scene() {
         toggleSketchSelection(id, event.shiftKey)
         gesture.current = {
           kind:
-            handle === 'rotate' || tool === 'Rotate'
+            handle === 'rotate' || activeTool === 'Rotate'
               ? 'sketch-rotate'
-              : handle === 'scale' || tool === 'Scale'
+              : handle === 'scale' || activeTool === 'Scale'
                 ? 'sketch-scale'
                 : 'sketch-move',
           id,
@@ -880,11 +888,38 @@ function Scene() {
     }
     if (remainderEl) {
       const layerId = remainderEl.dataset.remainderId as string
-      selectRemainder(layerId)
-      gesture.current = {
-        kind: tool === 'Rotate' ? 'remainder-rotate' : 'remainder-move',
-        layerId,
-        startClient: { x: event.clientX, y: event.clientY }
+      const layer = sceneLayers.find((item) => item.id === layerId)
+      if (!layer) return
+      if (currentState.selectedRemainderLayerId === layerId) {
+        gesture.current = {
+          kind:
+            activeTool === 'Rotate'
+              ? 'remainder-rotate'
+              : activeTool === 'Scale'
+                ? 'remainder-scale'
+                : activeTool === 'Depth'
+                  ? 'remainder-depth'
+                  : 'remainder-move',
+          layerId,
+          startClient: { x: event.clientX, y: event.clientY }
+        }
+      } else {
+        selectLayer(layerId)
+        if (activeTool === 'Select') return
+        gesture.current = {
+          kind:
+            activeTool === 'Rotate'
+              ? 'layer-rotate'
+              : activeTool === 'Scale'
+                ? 'layer-scale'
+                : activeTool === 'Depth'
+                  ? 'layer-depth'
+                  : 'layer-move',
+          layerId,
+          startClient: { x: event.clientX, y: event.clientY },
+          transform: { ...layer.transform },
+          depth: layer.depth
+        }
       }
       event.currentTarget.setPointerCapture?.(event.pointerId)
       return
@@ -895,9 +930,13 @@ function Scene() {
       togglePieceSelection(id, event.shiftKey)
       gesture.current = {
         kind:
-          target.closest('[data-handle="rotate"]') || tool === 'Rotate'
+          target.closest('[data-handle="rotate"]') || activeTool === 'Rotate'
             ? 'piece-rotate'
-            : 'piece-move',
+            : target.closest('[data-handle="scale"]') || activeTool === 'Scale'
+              ? 'piece-scale'
+              : activeTool === 'Depth'
+                ? 'piece-depth'
+                : 'piece-move',
         id,
         layerId,
         startClient: { x: event.clientX, y: event.clientY }
@@ -910,14 +949,14 @@ function Scene() {
       const layer = sceneLayers.find((item) => item.id === layerId)
       if (!layer) return
       selectLayer(layerId)
-      if (tool !== 'Select') {
+      if (activeTool !== 'Select') {
         gesture.current = {
           kind:
-            tool === 'Rotate'
+            activeTool === 'Rotate'
               ? 'layer-rotate'
-              : tool === 'Scale'
+              : activeTool === 'Scale'
                 ? 'layer-scale'
-                : tool === 'Depth'
+                : activeTool === 'Depth'
                   ? 'layer-depth'
                   : 'layer-move',
           layerId,
@@ -1025,6 +1064,14 @@ function Scene() {
       rotateRemainder(current.layerId, dx * 0.45)
       current.startClient.x = event.clientX
     }
+    if (current.kind === 'remainder-scale' && current.layerId) {
+      scaleRemainder(current.layerId, dx * 0.01, dy * 0.01)
+      current.startClient = { x: event.clientX, y: event.clientY }
+    }
+    if (current.kind === 'remainder-depth' && current.layerId) {
+      changeRemainderDepth(current.layerId, dx * 2)
+      current.startClient.x = event.clientX
+    }
     if (current.kind === 'piece-move' && current.id && current.layerId) {
       const element = stageRef.current?.querySelector<HTMLElement>(
         '[data-canvas-layer="' + current.layerId + '"]'
@@ -1040,6 +1087,14 @@ function Scene() {
     }
     if (current.kind === 'piece-rotate' && current.id) {
       rotatePiece(current.id, dx * 0.45)
+      current.startClient.x = event.clientX
+    }
+    if (current.kind === 'piece-scale' && current.id) {
+      scalePiece(current.id, dx * 0.01, dy * 0.01)
+      current.startClient = { x: event.clientX, y: event.clientY }
+    }
+    if (current.kind === 'piece-depth' && current.id) {
+      changePieceDepth(current.id, dx * 2)
       current.startClient.x = event.clientX
     }
     if (current.layerId && current.transform) {
@@ -1262,7 +1317,11 @@ function Scene() {
                         layer.sheetTransform.y +
                         ') rotate(' +
                         layer.sheetTransform.rotation +
-                        ' 50 50)'
+                        ' 50 50) translate(50 50) scale(' +
+                        layer.sheetTransform.scaleX +
+                        ' ' +
+                        layer.sheetTransform.scaleY +
+                        ') translate(-50 -50)'
                       }
                     >
                       <rect width="100" height="100" fill="transparent" />
@@ -1284,6 +1343,7 @@ function Scene() {
                     </g>
                     {layer.pieces
                       .filter((piece) => piece.visible)
+                      .sort((a, b) => a.depthOffset - b.depthOffset)
                       .map((piece) => {
                         const bounds = shapeBounds(piece.shapes)
                         return (
@@ -1297,6 +1357,19 @@ function Scene() {
                                 ? 'selected'
                                 : '')
                             }
+                            style={{
+                              filter: selectedPieces.includes(piece.id)
+                                ? 'drop-shadow(0 0 1px #fff) drop-shadow(0 ' +
+                                  Math.max(1, piece.depthOffset / 6) +
+                                  'px ' +
+                                  Math.max(2, Math.abs(piece.depthOffset) / 8) +
+                                  'px rgba(0,0,0,.58))'
+                                : 'drop-shadow(0 ' +
+                                  Math.max(1, piece.depthOffset / 6) +
+                                  'px ' +
+                                  Math.max(1, Math.abs(piece.depthOffset) / 8) +
+                                  'px rgba(0,0,0,.48))'
+                            }}
                             transform={
                               'translate(' +
                               piece.x +
@@ -1308,6 +1381,10 @@ function Scene() {
                               bounds.cx +
                               ' ' +
                               bounds.cy +
+                              ') scale(' +
+                              piece.scaleX +
+                              ' ' +
+                              piece.scaleY +
                               ')'
                             }
                           >
@@ -1467,8 +1544,29 @@ function Inspector() {
 }
 
 function Timeline() {
-  const { time, setTime, playing, togglePlaying, selected, select } =
-    useUIStore()
+  const {
+    time,
+    setTime,
+    playing,
+    togglePlaying,
+    selected,
+    selectedPieces,
+    sceneLayers,
+    select,
+    selectLayer,
+    togglePieceSelection
+  } = useUIStore()
+  const timelineTracks = [
+    { id: 'camera', label: 'Camera', kind: 'camera' as const },
+    ...sceneLayers.flatMap((layer) => [
+      { id: layer.id, label: layer.name, kind: 'layer' as const },
+      ...layer.pieces.map((piece) => ({
+        id: piece.id,
+        label: piece.name,
+        kind: 'piece' as const
+      }))
+    ])
+  ]
   return (
     <section className="timeline">
       <div className="resize-handle" />
@@ -1500,18 +1598,23 @@ function Timeline() {
       </div>
       <div className="timeline-body">
         <div className="track-list">
-          {tracks.map((track) => (
+          {timelineTracks.map((track) => (
             <button
-              key={track}
+              key={track.id}
               className={
-                selected === track.toLowerCase().replace(' ', '-')
+                selected === track.id || selectedPieces.includes(track.id)
                   ? 'selected'
                   : ''
               }
-              onClick={() => select(track.toLowerCase().replace(' ', '-'))}
+              onClick={() => {
+                if (track.kind === 'layer') selectLayer(track.id)
+                else if (track.kind === 'piece')
+                  togglePieceSelection(track.id, false)
+                else select(track.id)
+              }}
             >
               <I.ChevronRight size={13} />
-              {track}
+              {track.label}
             </button>
           ))}
         </div>

@@ -40,7 +40,14 @@ const hydrateLayer = (
   ({
     ...layer,
     transform: { ...layer.transform },
-    sheetTransform: layer.sheetTransform ?? { x: 0, y: 0, rotation: 0 },
+    sheetTransform: {
+      x: layer.sheetTransform?.x ?? 0,
+      y: layer.sheetTransform?.y ?? 0,
+      rotation: layer.sheetTransform?.rotation ?? 0,
+      scaleX: layer.sheetTransform?.scaleX ?? 1,
+      scaleY: layer.sheetTransform?.scaleY ?? 1,
+      depthOffset: layer.sheetTransform?.depthOffset ?? 0
+    },
     sketches: layer.sketches ?? [],
     cuts: layer.cuts ?? [],
     pieces: (layer.pieces ?? []).map((piece) => ({
@@ -105,6 +112,8 @@ export type UIState = {
   setLayerDepth: (id: string, depth: number) => void
   moveRemainder: (layerId: string, dx: number, dy: number) => void
   rotateRemainder: (layerId: string, angle: number) => void
+  scaleRemainder: (layerId: string, dx: number, dy: number) => void
+  changeRemainderDepth: (layerId: string, delta: number) => void
   setLayerTransform: (
     id: string,
     field: keyof LayerTransform,
@@ -134,7 +143,10 @@ export type UIState = {
   cutSelectedContours: () => void
   movePiece: (id: string, dx: number, dy: number) => void
   rotatePiece: (id: string, angle: number) => void
+  scalePiece: (id: string, dx: number, dy: number) => void
+  changePieceDepth: (id: string, delta: number) => void
   togglePieceVisibility: (layerId: string, pieceId: string) => void
+  deletePiece: (pieceId: string) => void
   deleteSelectedPieces: () => void
   joinSelectedPieces: () => void
   saveProject: () => void
@@ -249,8 +261,22 @@ export const useUIStore = create<UIState>((set, get) => ({
         depth: 0,
         color: '#d6a36e',
         visible: true,
-        transform: { x: 0, y: 0, rotation: 0, width: 50, height: 50, opacity: 100 },
-        sheetTransform: { x: 0, y: 0, rotation: 0 },
+        transform: {
+          x: 0,
+          y: 0,
+          rotation: 0,
+          width: 50,
+          height: 50,
+          opacity: 100
+        },
+        sheetTransform: {
+          x: 0,
+          y: 0,
+          rotation: 0,
+          scaleX: 1,
+          scaleY: 1,
+          depthOffset: 0
+        },
         sketches: [],
         cuts: [],
         pieces: []
@@ -307,6 +333,41 @@ export const useUIStore = create<UIState>((set, get) => ({
               sheetTransform: {
                 ...layer.sheetTransform,
                 rotation: layer.sheetTransform.rotation + angle
+              }
+            }
+          : layer
+      ),
+      saveStatus: 'unsaved'
+    })),
+  scaleRemainder: (layerId, dx, dy) =>
+    set((state) => ({
+      sceneLayers: state.sceneLayers.map((layer) =>
+        layer.id === layerId
+          ? {
+              ...layer,
+              sheetTransform: {
+                ...layer.sheetTransform,
+                scaleX: clamp(layer.sheetTransform.scaleX + dx, 0.1, 4),
+                scaleY: clamp(layer.sheetTransform.scaleY + dy, 0.1, 4)
+              }
+            }
+          : layer
+      ),
+      saveStatus: 'unsaved'
+    })),
+  changeRemainderDepth: (layerId, delta) =>
+    set((state) => ({
+      sceneLayers: state.sceneLayers.map((layer) =>
+        layer.id === layerId
+          ? {
+              ...layer,
+              sheetTransform: {
+                ...layer.sheetTransform,
+                depthOffset: clamp(
+                  layer.sheetTransform.depthOffset + delta,
+                  -300,
+                  300
+                )
               }
             }
           : layer
@@ -574,6 +635,9 @@ export const useUIStore = create<UIState>((set, get) => ({
         x: 0,
         y: 0,
         rotation: 0,
+        scaleX: 1,
+        scaleY: 1,
+        depthOffset: 12,
         visible: true
       }))
       return {
@@ -634,6 +698,37 @@ export const useUIStore = create<UIState>((set, get) => ({
       })),
       saveStatus: 'unsaved'
     })),
+  scalePiece: (id, dx, dy) =>
+    set((state) => ({
+      sceneLayers: state.sceneLayers.map((layer) => ({
+        ...layer,
+        pieces: layer.pieces.map((piece) =>
+          piece.id === id
+            ? {
+                ...piece,
+                scaleX: clamp(piece.scaleX + dx, 0.1, 4),
+                scaleY: clamp(piece.scaleY + dy, 0.1, 4)
+              }
+            : piece
+        )
+      })),
+      saveStatus: 'unsaved'
+    })),
+  changePieceDepth: (id, delta) =>
+    set((state) => ({
+      sceneLayers: state.sceneLayers.map((layer) => ({
+        ...layer,
+        pieces: layer.pieces.map((piece) =>
+          piece.id === id
+            ? {
+                ...piece,
+                depthOffset: clamp(piece.depthOffset + delta, -300, 300)
+              }
+            : piece
+        )
+      })),
+      saveStatus: 'unsaved'
+    })),
   togglePieceVisibility: (layerId, pieceId) =>
     set((state) => ({
       sceneLayers: state.sceneLayers.map((layer) =>
@@ -648,6 +743,15 @@ export const useUIStore = create<UIState>((set, get) => ({
             }
           : layer
       ),
+      saveStatus: 'unsaved'
+    })),
+  deletePiece: (pieceId) =>
+    set((state) => ({
+      sceneLayers: state.sceneLayers.map((layer) => ({
+        ...layer,
+        pieces: layer.pieces.filter((piece) => piece.id !== pieceId)
+      })),
+      selectedPieces: state.selectedPieces.filter((id) => id !== pieceId),
       saveStatus: 'unsaved'
     })),
   deleteSelectedPieces: () =>
@@ -685,6 +789,9 @@ export const useUIStore = create<UIState>((set, get) => ({
               x: first.x,
               y: first.y,
               rotation: first.rotation,
+              scaleX: first.scaleX,
+              scaleY: first.scaleY,
+              depthOffset: first.depthOffset,
               visible: true
             }
           ]

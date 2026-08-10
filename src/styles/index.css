@@ -202,7 +202,6 @@ select:focus-visible {
 }
 .layer-row:hover,
 .layer-row.selected,
-.components button.selected,
 .tools button.selected,
 .assets button.selected,
 .track-list button.selected {
@@ -214,22 +213,6 @@ select:focus-visible {
   height: 16px;
   border-radius: 2px;
   box-shadow: inset 0 0 0 1px #fff3;
-}
-.components {
-  margin: 0 0 5px 27px;
-  border-left: 1px solid #41464f;
-}
-.components button {
-  display: flex;
-  gap: 7px;
-  align-items: center;
-  padding: 5px 8px;
-  width: 100%;
-  border: 0;
-  background: transparent;
-  color: #aeb3bb;
-  text-align: left;
-  border-radius: 3px;
 }
 .add-layer {
   width: 100%;
@@ -1542,7 +1525,7 @@ select:focus-visible {
 }
 .hierarchy-line {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 24px;
+  grid-template-columns: minmax(0, 1fr) 24px 24px;
   align-items: center;
 }
 .hierarchy-line > button:last-child {
@@ -1751,4 +1734,18 @@ select:focus-visible {
 }
 .rotate-handle {
   cursor: crosshair;
+}
+
+.hierarchy-delete {
+  color: #9c6b66 !important;
+}
+.hierarchy-delete:hover {
+  background: #552f2c !important;
+  color: #ffc0b4 !important;
+}
+.sheet-hit {
+  cursor: move;
+}
+.sheet-hit.selected > rect:first-child {
+  pointer-events: all;
 }

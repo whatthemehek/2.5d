@@ -10,6 +10,7 @@ beforeEach(() =>
     tab: 'layers',
     tool: 'Select',
     selected: 'foreground',
+    selectedRemainderLayerId: null,
     activeSketchLayerId: 'foreground',
     selectedPieces: [],
     selectedSketchIds: [],
@@ -61,8 +62,8 @@ describe('Papercut wireframe', () => {
     fireEvent.click(screen.getByText('Rotate'))
     expect(useUIStore.getState().tool).toBe('Rotate')
     fireEvent.click(screen.getByText('layers'))
-    fireEvent.click(screen.getAllByText('Right Arm')[0])
-    expect(useUIStore.getState().selected).toBe('right-arm')
+    fireEvent.click(screen.getAllByText('Sheet remainder')[0])
+    expect(useUIStore.getState().selectedRemainderLayerId).toBe('foreground')
   })
   it('opens and closes dialogs', () => {
     render(<App />)
@@ -200,6 +201,137 @@ describe('Papercut wireframe', () => {
   it('keeps the three layer limit disabled', () => {
     render(<App />)
     expect(screen.getByText('Add Layer').closest('button')).toBeDisabled()
+  })
+})
+
+describe('Compose object tools', () => {
+  it('moves, rotates, scales, and changes depth for a logical layer', () => {
+    render(<App />)
+    const stage = document.querySelector('.layer-stage') as HTMLElement
+    const sheet = document.querySelector('[data-remainder-id="foreground"]')!
+    const drag = (
+      tool: string,
+      from: [number, number],
+      to: [number, number],
+      pointerId: number
+    ) => {
+      fireEvent.click(screen.getByLabelText(tool + ' tool'))
+      fireEvent.pointerDown(sheet, {
+        clientX: from[0],
+        clientY: from[1],
+        pointerId
+      })
+      fireEvent.pointerMove(stage, {
+        clientX: to[0],
+        clientY: to[1],
+        pointerId
+      })
+      fireEvent.pointerUp(stage, { pointerId })
+    }
+    drag('Move', [100, 100], [140, 125], 21)
+    drag('Rotate', [100, 100], [140, 100], 22)
+    drag('Scale', [100, 100], [140, 120], 23)
+    drag('Depth', [100, 100], [120, 100], 24)
+    const layer = useUIStore.getState().sceneLayers[0]
+    expect(layer.transform).toMatchObject({
+      x: 40,
+      y: 25,
+      rotation: 18,
+      width: 31,
+      height: 28
+    })
+    expect(layer.depth).toBe(940)
+  })
+
+  it('moves, rotates, scales, and changes depth for a sheet remainder', () => {
+    render(<App />)
+    fireEvent.click(screen.getAllByText('Sheet remainder')[0])
+    const stage = document.querySelector('.layer-stage') as HTMLElement
+    const layerElement = document.querySelector(
+      '[data-canvas-layer="foreground"]'
+    ) as HTMLElement
+    Object.defineProperty(layerElement, 'clientWidth', { value: 400 })
+    Object.defineProperty(layerElement, 'clientHeight', { value: 400 })
+    const sheet = document.querySelector('[data-remainder-id="foreground"]')!
+    const drag = (tool: string, dx: number, dy: number, pointerId: number) => {
+      fireEvent.click(screen.getByLabelText(tool + ' tool'))
+      fireEvent.pointerDown(sheet, { clientX: 100, clientY: 100, pointerId })
+      fireEvent.pointerMove(stage, {
+        clientX: 100 + dx,
+        clientY: 100 + dy,
+        pointerId
+      })
+      fireEvent.pointerUp(stage, { pointerId })
+    }
+    drag('Move', 40, 20, 31)
+    drag('Rotate', 20, 0, 32)
+    drag('Scale', 20, 10, 33)
+    drag('Depth', 10, 0, 34)
+    expect(useUIStore.getState().sceneLayers[0].sheetTransform).toMatchObject({
+      x: 10,
+      y: 5,
+      rotation: 9,
+      scaleX: 1.2,
+      scaleY: 1.1,
+      depthOffset: 20
+    })
+  })
+
+  it('transforms and individually deletes a cutout', () => {
+    useUIStore.getState().addSketchObject('foreground', {
+      id: 'cut-source',
+      name: 'Round',
+      visible: true,
+      closed: true,
+      shapes: [
+        {
+          id: 'round-shape',
+          type: 'circle',
+          closed: true,
+          points: [
+            { x: 20, y: 20 },
+            { x: 60, y: 60 }
+          ]
+        }
+      ]
+    })
+    useUIStore.setState({
+      selectedSketchIds: ['cut-source'],
+      activeSketchLayerId: 'foreground'
+    })
+    useUIStore.getState().cutSelectedContours()
+    render(<App />)
+    const stage = document.querySelector('.layer-stage') as HTMLElement
+    const layerElement = document.querySelector(
+      '[data-canvas-layer="foreground"]'
+    ) as HTMLElement
+    Object.defineProperty(layerElement, 'clientWidth', { value: 400 })
+    Object.defineProperty(layerElement, 'clientHeight', { value: 400 })
+    const piece = document.querySelector('[data-piece-id]')!
+    const drag = (tool: string, dx: number, dy: number, pointerId: number) => {
+      fireEvent.click(screen.getByLabelText(tool + ' tool'))
+      fireEvent.pointerDown(piece, { clientX: 100, clientY: 100, pointerId })
+      fireEvent.pointerMove(stage, {
+        clientX: 100 + dx,
+        clientY: 100 + dy,
+        pointerId
+      })
+      fireEvent.pointerUp(stage, { pointerId })
+    }
+    drag('Move', 40, 20, 27)
+    drag('Rotate', 20, 0, 28)
+    drag('Scale', 20, 10, 29)
+    drag('Depth', 10, 0, 30)
+    expect(useUIStore.getState().sceneLayers[0].pieces[0]).toMatchObject({
+      x: 10,
+      y: 5,
+      rotation: 9,
+      scaleX: 1.2,
+      scaleY: 1.1,
+      depthOffset: 32
+    })
+    fireEvent.click(screen.getByLabelText('Delete Round cutout'))
+    expect(useUIStore.getState().sceneLayers[0].pieces).toHaveLength(0)
   })
 })
 
@@ -398,6 +530,7 @@ describe('Layer sketch workspace', () => {
       .sceneLayers.find((item) => item.id === 'foreground')!
     expect(layer.cuts).toHaveLength(1)
     expect(layer.pieces).toHaveLength(1)
+    expect(layer.pieces[0].depthOffset).toBe(12)
     expect(layer.sketches[0].visible).toBe(false)
     expect(useUIStore.getState().mode).toBe('compose')
     useUIStore.getState().movePiece(layer.pieces[0].id, 12, -4)
