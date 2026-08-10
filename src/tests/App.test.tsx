@@ -186,9 +186,17 @@ describe('Papercut wireframe', () => {
     fireEvent.click(screen.getByText('Add Layer'))
     expect(useUIStore.getState().sceneLayers).toHaveLength(3)
   })
-  it('zooms with the pointer wheel', () => {
+  it('zooms only the viewer and cancels pinch-style browser zoom', () => {
     render(<App />)
-    fireEvent.wheel(document.querySelector('.layer-stage')!, { deltaY: -100 })
+    const viewer = document.querySelector('.layer-viewport')!
+    const wheel = new WheelEvent('wheel', {
+      bubbles: true,
+      cancelable: true,
+      ctrlKey: true,
+      deltaY: -100
+    })
+    fireEvent(viewer, wheel)
+    expect(wheel.defaultPrevented).toBe(true)
     expect(useUIStore.getState().zoom).toBe(1.08)
   })
   it('zooms the stage controls', () => {
@@ -275,6 +283,106 @@ describe('Compose object tools', () => {
       scaleY: 1.1,
       depthOffset: 20
     })
+  })
+
+  it('locks interaction to a selected middle-layer remainder', () => {
+    render(<App />)
+    fireEvent.click(screen.getAllByText('Sheet remainder')[1])
+    const stage = document.querySelector('.layer-stage') as HTMLElement
+    const character = document.querySelector(
+      '[data-canvas-layer="character"]'
+    ) as HTMLElement
+    const background = document.querySelector(
+      '[data-canvas-layer="background"]'
+    ) as HTMLElement
+    const characterSheet = character.querySelector(
+      '[data-remainder-id="character"]'
+    )!
+    const backgroundSheet = background.querySelector(
+      '[data-remainder-id="background"]'
+    )!
+    Object.defineProperty(character, 'clientWidth', { value: 400 })
+    Object.defineProperty(character, 'clientHeight', { value: 400 })
+
+    expect(character.style.pointerEvents).toBe('auto')
+    expect(background.style.pointerEvents).toBe('none')
+    expect(
+      characterSheet.querySelector('[data-handle="move"]')
+    ).toBeInTheDocument()
+    expect(
+      characterSheet.querySelector('[data-handle="rotate"]')
+    ).toBeInTheDocument()
+
+    fireEvent.click(screen.getByLabelText('Move tool'))
+    fireEvent.pointerDown(backgroundSheet, {
+      clientX: 100,
+      clientY: 100,
+      pointerId: 41
+    })
+    fireEvent.pointerMove(stage, {
+      clientX: 140,
+      clientY: 120,
+      pointerId: 41
+    })
+    fireEvent.pointerUp(stage, { pointerId: 41 })
+    expect(useUIStore.getState().selectedRemainderLayerId).toBe('character')
+    expect(useUIStore.getState().sceneLayers[2].sheetTransform.x).toBe(0)
+
+    fireEvent.pointerDown(characterSheet, {
+      clientX: 100,
+      clientY: 100,
+      pointerId: 42
+    })
+    fireEvent.pointerMove(stage, {
+      clientX: 140,
+      clientY: 120,
+      pointerId: 42
+    })
+    fireEvent.pointerUp(stage, { pointerId: 42 })
+    expect(useUIStore.getState().sceneLayers[1].sheetTransform).toMatchObject({
+      x: 10,
+      y: 5
+    })
+  })
+
+  it('draws directly on the selected layer while remaining in Compose', () => {
+    render(<App />)
+    fireEvent.click(screen.getAllByText('Sheet remainder')[0])
+    fireEvent.click(screen.getByLabelText('Rectangle tool'))
+    const layer = document.querySelector(
+      '[data-canvas-layer="foreground"]'
+    ) as HTMLElement
+    const stage = document.querySelector('.layer-stage') as HTMLElement
+    Object.defineProperty(layer, 'getBoundingClientRect', {
+      value: () => ({
+        left: 0,
+        top: 0,
+        width: 400,
+        height: 400,
+        right: 400,
+        bottom: 400
+      })
+    })
+    fireEvent.pointerDown(layer, {
+      clientX: 80,
+      clientY: 100,
+      pointerId: 43
+    })
+    fireEvent.pointerMove(stage, {
+      clientX: 220,
+      clientY: 260,
+      pointerId: 43
+    })
+    expect(document.querySelector('.sketch-object.live')).toBeInTheDocument()
+    fireEvent.pointerUp(stage, {
+      clientX: 220,
+      clientY: 260,
+      pointerId: 43
+    })
+    expect(useUIStore.getState().mode).toBe('compose')
+    expect(useUIStore.getState().selectedRemainderLayerId).toBeNull()
+    expect(useUIStore.getState().sceneLayers[0].sketches).toHaveLength(1)
+    expect(document.querySelector('[data-sketch-id]')).toBeInTheDocument()
   })
 
   it('transforms and individually deletes a cutout', () => {

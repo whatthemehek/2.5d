@@ -200,41 +200,53 @@ export const useUIStore = create<UIState>((set, get) => ({
   setTool: (tool) => set({ tool }),
   select: (selected) => set({ selected }),
   selectLayer: (id) =>
-    set((state) => ({
+    set({
       selected: id,
       selectedRemainderLayerId: null,
-      activeSketchLayerId:
-        state.mode === 'sketch' ? id : state.activeSketchLayerId,
+      activeSketchLayerId: id,
       selectedPieces: [],
       selectedSketchIds: []
-    })),
+    }),
   selectRemainder: (layerId) =>
     set({
       selected: layerId,
+      activeSketchLayerId: layerId,
       selectedRemainderLayerId: layerId,
       selectedPieces: [],
       selectedSketchIds: []
     }),
   togglePieceSelection: (id, additive = false) =>
-    set((state) => ({
-      selectedPieces: additive
-        ? state.selectedPieces.includes(id)
-          ? state.selectedPieces.filter((item) => item !== id)
-          : [...state.selectedPieces, id]
-        : [id],
-      selectedSketchIds: [],
-      selectedRemainderLayerId: null
-    })),
+    set((state) => {
+      const layerId = state.sceneLayers.find((layer) =>
+        layer.pieces.some((piece) => piece.id === id)
+      )?.id
+      return {
+        selectedPieces: additive
+          ? state.selectedPieces.includes(id)
+            ? state.selectedPieces.filter((item) => item !== id)
+            : [...state.selectedPieces, id]
+          : [id],
+        selectedSketchIds: [],
+        selectedRemainderLayerId: null,
+        ...(layerId ? { selected: layerId, activeSketchLayerId: layerId } : {})
+      }
+    }),
   toggleSketchSelection: (id, additive = false) =>
-    set((state) => ({
-      selectedSketchIds: additive
-        ? state.selectedSketchIds.includes(id)
-          ? state.selectedSketchIds.filter((item) => item !== id)
-          : [...state.selectedSketchIds, id]
-        : [id],
-      selectedPieces: [],
-      selectedRemainderLayerId: null
-    })),
+    set((state) => {
+      const layerId = state.sceneLayers.find((layer) =>
+        layer.sketches.some((sketch) => sketch.id === id)
+      )?.id
+      return {
+        selectedSketchIds: additive
+          ? state.selectedSketchIds.includes(id)
+            ? state.selectedSketchIds.filter((item) => item !== id)
+            : [...state.selectedSketchIds, id]
+          : [id],
+        selectedPieces: [],
+        selectedRemainderLayerId: null,
+        ...(layerId ? { selected: layerId, activeSketchLayerId: layerId } : {})
+      }
+    }),
   setDialog: (dialog) => set({ dialog }),
   setTime: (time) => set({ time: clamp(time, 0, 12) }),
   togglePlaying: () => set((state) => ({ playing: !state.playing })),
@@ -486,8 +498,11 @@ export const useUIStore = create<UIState>((set, get) => ({
           ? { ...layer, sketches: [...layer.sketches, object] }
           : layer
       ),
+      selected: layerId,
+      activeSketchLayerId: layerId,
       selectedSketchIds: [object.id],
       selectedPieces: [],
+      selectedRemainderLayerId: null,
       saveStatus: 'unsaved'
     })),
   updateSketchObjectShapes: (layerId, objectId, shapes) =>
