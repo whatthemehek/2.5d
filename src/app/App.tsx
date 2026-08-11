@@ -724,7 +724,13 @@ function PaperSurface({ layer, aspect }: { layer: Layer; aspect: number }) {
   )
 }
 
-function SelectionBounds({ shapes }: { shapes: CutShape[] }) {
+function SelectionBounds({
+  shapes,
+  ownerId
+}: {
+  shapes: CutShape[]
+  ownerId: string
+}) {
   const bounds = shapeBounds(shapes)
   const left = bounds.x <= 0 ? 1 : bounds.x - 1
   const top = bounds.y <= 0 ? 1 : bounds.y - 1
@@ -735,7 +741,7 @@ function SelectionBounds({ shapes }: { shapes: CutShape[] }) {
   const rotateLineY = top - 6
   const rotateY = top - 7
   return (
-    <g className="vector-selection">
+    <g className="vector-selection" data-selection-owner={ownerId}>
       <rect x={left} y={top} width={right - left} height={bottom - top} />
       {[
         [left, top, 'nw'],
@@ -1023,6 +1029,11 @@ function Scene() {
       ? Math.max(0.46, Math.min(0.86, 900 / (900 + depthSpan * 0.58)))
       : 1
   const visibleZoom = zoom * autoFit
+  const activePieceId = selectedPieces[selectedPieces.length - 1]
+  const activeSketchId = selectedSketchIds[selectedSketchIds.length - 1]
+  const hasDirectObjectSelection = Boolean(
+    selectedRemainderLayerId || activePieceId || activeSketchId
+  )
   const layerPoint = (event: ReactPointerEvent, layerId: string) => {
     const element = stageRef.current?.querySelector<HTMLElement>(
       '[data-canvas-layer="' + layerId + '"]'
@@ -1141,7 +1152,13 @@ function Scene() {
       const layerId = layerEl?.dataset.canvasLayer as string
       const layer = currentState.sceneLayers.find((item) => item.id === layerId)
       const object = layer?.sketches.find((item) => item.id === id)
-      if (!object || !currentState.selectedSketchIds.includes(id)) return
+      if (
+        !object ||
+        currentState.selectedSketchIds[
+          currentState.selectedSketchIds.length - 1
+        ] !== id
+      )
+        return
       gesture.current = {
         kind:
           handle === 'rotate'
@@ -1165,7 +1182,11 @@ function Scene() {
 
     if (pieceEl) {
       const id = pieceEl.dataset.pieceId as string
-      if (!currentState.selectedPieces.includes(id)) return
+      if (
+        currentState.selectedPieces[currentState.selectedPieces.length - 1] !==
+        id
+      )
+        return
       const layerId = pieceEl.dataset.layerId as string
       const layer = currentState.sceneLayers.find((item) => item.id === layerId)
       const piece = layer?.pieces.find((item) => item.id === id)
@@ -1733,9 +1754,11 @@ function Scene() {
           strokeWidth={1.2}
         />
       ))}
-      {!live && selectedSketchIds.includes(object.id) && (
-        <SelectionBounds shapes={object.shapes} />
-      )}
+      {!live &&
+        selectedSketchIds.includes(object.id) &&
+        object.id === activeSketchId && (
+          <SelectionBounds shapes={object.shapes} ownerId={object.id} />
+        )}
     </g>
   )
   return (
@@ -1815,20 +1838,10 @@ function Scene() {
               )
               const contextLayer =
                 mode === 'sketch' && layer.id !== activeSketchLayerId
-              const selectedPieceOnLayer = layer.pieces.some((piece) =>
-                selectedPieces.includes(piece.id)
-              )
-              const selectedSketchOnLayer = layer.sketches.some((sketch) =>
-                selectedSketchIds.includes(sketch.id)
-              )
               const selectedRemainderOnLayer =
                 selectedRemainderLayerId === layer.id
-              const hasSubObjectSelection =
-                selectedPieceOnLayer ||
-                selectedSketchOnLayer ||
-                selectedRemainderOnLayer
               const logicalLayerSelected =
-                selected === layer.id && !hasSubObjectSelection
+                selected === layer.id && !hasDirectObjectSelection
               const layerIsInteractive = layer.id === interactionLayerId
               return (
                 <div
@@ -1912,6 +1925,7 @@ function Scene() {
                       <rect width="100" height="100" fill="transparent" />
                       {selectedRemainderLayerId === layer.id && (
                         <SelectionBounds
+                          ownerId={'remainder-' + layer.id}
                           shapes={[
                             {
                               id: 'sheet-bounds',
@@ -1928,7 +1942,15 @@ function Scene() {
                     </g>
                     {layer.pieces
                       .filter((piece) => piece.visible)
-                      .sort((a, b) => a.depthOffset - b.depthOffset)
+                      .sort((a, b) => {
+                        const aActive = a.id === activePieceId
+                        const bActive = b.id === activePieceId
+                        return aActive === bActive
+                          ? a.depthOffset - b.depthOffset
+                          : aActive
+                            ? 1
+                            : -1
+                      })
                       .map((piece) => {
                         const bounds = shapeBounds(piece.shapes)
                         return (
@@ -1967,6 +1989,16 @@ function Scene() {
                               aspect: layerAspect
                             })}
                           >
+                            {piece.id === activePieceId && (
+                              <rect
+                                className="piece-drag-surface"
+                                x={bounds.x}
+                                y={bounds.y}
+                                width={bounds.width}
+                                height={bounds.height}
+                                fill="transparent"
+                              />
+                            )}
                             {piece.shapes.map((shape) => (
                               <g key={shape.id}>
                                 <ShapeGeometry
@@ -1988,8 +2020,11 @@ function Scene() {
                                 </g>
                               </g>
                             ))}
-                            {selectedPieces.includes(piece.id) && (
-                              <SelectionBounds shapes={piece.shapes} />
+                            {piece.id === activePieceId && (
+                              <SelectionBounds
+                                shapes={piece.shapes}
+                                ownerId={piece.id}
+                              />
                             )}
                           </g>
                         )
@@ -2015,6 +2050,7 @@ function Scene() {
                     {mode === 'compose' && logicalLayerSelected && (
                       <g data-layer-control-id={layer.id}>
                         <SelectionBounds
+                          ownerId={'layer-' + layer.id}
                           shapes={[
                             {
                               id: 'layer-bounds',

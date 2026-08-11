@@ -58,8 +58,18 @@ describe('Papercut wireframe', () => {
   })
   it('selects a sheet remainder from the layer hierarchy', () => {
     render(<App />)
+    expect(
+      Array.from(document.querySelectorAll('[data-selection-owner]')).map(
+        (element) => element.getAttribute('data-selection-owner')
+      )
+    ).toEqual(['layer-foreground'])
     fireEvent.click(screen.getAllByText('Sheet remainder')[0])
     expect(useUIStore.getState().selectedRemainderLayerId).toBe('foreground')
+    expect(
+      Array.from(document.querySelectorAll('[data-selection-owner]')).map(
+        (element) => element.getAttribute('data-selection-owner')
+      )
+    ).toEqual(['remainder-foreground'])
   })
   it('returns to Compose when selecting a sheet remainder from Sketch', () => {
     render(<App />)
@@ -564,6 +574,14 @@ describe('Compose object tools', () => {
     expect(useUIStore.getState().selectedPieces).toEqual([])
     fireEvent.doubleClick(piece)
     expect(useUIStore.getState().selectedPieces).toEqual([cutoutId])
+    expect(document.querySelectorAll('[data-selection-owner]')).toHaveLength(1)
+    expect(
+      document
+        .querySelector('[data-selection-owner]')
+        ?.getAttribute('data-selection-owner')
+    ).toBe(cutoutId)
+    const dragSurface = piece.querySelector('.piece-drag-surface')!
+    expect(dragSurface).toBeInTheDocument()
 
     const drag = (
       target: Element,
@@ -583,7 +601,7 @@ describe('Compose object tools', () => {
       })
       fireEvent.pointerUp(stage, { pointerId })
     }
-    drag(piece, 40, 20, 27)
+    drag(dragSurface, 40, 20, 27)
     drag(piece.querySelector('[data-handle="rotate"]')!, 20, 0, 28)
     const matrix = piece.getAttribute('transform')!
     expect(matrix).toMatch(/^matrix\(/)
