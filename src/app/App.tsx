@@ -732,9 +732,8 @@ function SelectionBounds({ shapes }: { shapes: CutShape[] }) {
     bounds.x + bounds.width >= 100 ? 99 : bounds.x + bounds.width + 1
   const bottom =
     bounds.y + bounds.height >= 100 ? 99 : bounds.y + bounds.height + 1
-  const rotateBelow = top < 8
-  const rotateLineY = rotateBelow ? top + 6 : top - 6
-  const rotateY = rotateBelow ? top + 7 : top - 7
+  const rotateLineY = top - 6
+  const rotateY = top - 7
   return (
     <g className="vector-selection">
       <rect x={left} y={top} width={right - left} height={bottom - top} />
@@ -777,6 +776,155 @@ type Gesture = {
   transform?: Layer['transform']
   depth?: number
   handlePosition?: string
+  pointerStart?: SketchPoint
+  centerClient?: SketchPoint
+  startPointerAngle?: number
+  scaleBasis?: {
+    fixed: SketchPoint
+    xUnit: SketchPoint
+    yUnit: SketchPoint
+    width: number
+    height: number
+  }
+  objectTransform?: {
+    x: number
+    y: number
+    rotation: number
+    scaleX: number
+    scaleY: number
+    aspect: number
+    bounds: ReturnType<typeof shapeBounds>
+  }
+}
+
+const oppositeCorner: Record<string, string> = {
+  nw: 'se',
+  ne: 'sw',
+  sw: 'ne',
+  se: 'nw'
+}
+
+const scaleCornerBasis: Record<
+  string,
+  { fixed: string; x: string; y: string }
+> = {
+  nw: { fixed: 'se', x: 'sw', y: 'ne' },
+  ne: { fixed: 'sw', x: 'se', y: 'nw' },
+  sw: { fixed: 'ne', x: 'nw', y: 'se' },
+  se: { fixed: 'nw', x: 'ne', y: 'sw' }
+}
+
+function handleCenter(owner: Element, position: string) {
+  const handle = owner.querySelector<SVGElement>(
+    '[data-handle-position="' + position + '"]'
+  )
+  const rect = handle?.getBoundingClientRect()
+  if (!rect || (rect.width === 0 && rect.height === 0)) return null
+  return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+}
+
+function directGestureGeometry(
+  owner: Element,
+  event: ReactPointerEvent,
+  handle: string | undefined,
+  handlePosition: string | undefined
+) {
+  const nw = handleCenter(owner, 'nw')
+  const se = handleCenter(owner, 'se')
+  const centerClient =
+    nw && se ? { x: (nw.x + se.x) / 2, y: (nw.y + se.y) / 2 } : undefined
+  const rotation =
+    handle === 'rotate' && centerClient
+      ? {
+          centerClient,
+          startPointerAngle: Math.atan2(
+            event.clientY - centerClient.y,
+            event.clientX - centerClient.x
+          )
+        }
+      : {}
+  if (handle !== 'scale' || !handlePosition) return rotation
+  const map = scaleCornerBasis[handlePosition]
+  if (!map) return rotation
+  const fixed = handleCenter(owner, map.fixed)
+  const xPoint = handleCenter(owner, map.x)
+  const yPoint = handleCenter(owner, map.y)
+  if (!fixed || !xPoint || !yPoint) return rotation
+  const xVector = { x: xPoint.x - fixed.x, y: xPoint.y - fixed.y }
+  const yVector = { x: yPoint.x - fixed.x, y: yPoint.y - fixed.y }
+  const width = Math.hypot(xVector.x, xVector.y)
+  const height = Math.hypot(yVector.x, yVector.y)
+  if (width < 1 || height < 1) return rotation
+  return {
+    ...rotation,
+    scaleBasis: {
+      fixed,
+      xUnit: { x: xVector.x / width, y: xVector.y / width },
+      yUnit: { x: yVector.x / height, y: yVector.y / height },
+      width,
+      height
+    }
+  }
+}
+
+function rotationGestureDelta(
+  current: Gesture,
+  event: ReactPointerEvent,
+  fallbackDx: number
+) {
+  if (!current.centerClient || current.startPointerAngle === undefined)
+    return fallbackDx * 0.45
+  const angle = Math.atan2(
+    event.clientY - current.centerClient.y,
+    event.clientX - current.centerClient.x
+  )
+  let degrees = ((angle - current.startPointerAngle) * 180) / Math.PI
+  if (degrees > 180) degrees -= 360
+  if (degrees < -180) degrees += 360
+  return degrees
+}
+
+function gestureScaleRatios(current: Gesture, event: ReactPointerEvent) {
+  const basis = current.scaleBasis
+  if (!basis) return null
+  const vector = {
+    x: event.clientX - basis.fixed.x,
+    y: event.clientY - basis.fixed.y
+  }
+  const projectedWidth = vector.x * basis.xUnit.x + vector.y * basis.xUnit.y
+  const projectedHeight = vector.x * basis.yUnit.x + vector.y * basis.yUnit.y
+  return {
+    x: Math.max(0.08, Math.min(8, projectedWidth / basis.width)),
+    y: Math.max(0.08, Math.min(8, projectedHeight / basis.height))
+  }
+}
+
+function fixedCornerPoint(
+  bounds: ReturnType<typeof shapeBounds>,
+  draggedCorner: string | undefined
+) {
+  const fixed = oppositeCorner[draggedCorner ?? 'se'] ?? 'nw'
+  return {
+    x: fixed.includes('w') ? bounds.x : bounds.x + bounds.width,
+    y: fixed.includes('n') ? bounds.y : bounds.y + bounds.height
+  }
+}
+
+function transformedOffset(
+  point: SketchPoint,
+  transform: NonNullable<Gesture['objectTransform']>,
+  scaleX = transform.scaleX,
+  scaleY = transform.scaleY
+) {
+  const radians = (transform.rotation * Math.PI) / 180
+  const cosine = Math.cos(radians)
+  const sine = Math.sin(radians)
+  const localX = point.x - transform.bounds.cx
+  const localY = point.y - transform.bounds.cy
+  return {
+    x: cosine * scaleX * localX - (sine * scaleY * localY) / transform.aspect,
+    y: sine * scaleX * transform.aspect * localX + cosine * scaleY * localY
+  }
 }
 
 function Scene() {
@@ -892,6 +1040,32 @@ function Scene() {
       )
     }
   }
+  const clientPointForLayer = (
+    clientX: number,
+    clientY: number,
+    layerId: string
+  ) => {
+    const element = stageRef.current?.querySelector<HTMLElement>(
+      '[data-canvas-layer="' + layerId + '"]'
+    )
+    const svg = element?.querySelector<SVGSVGElement>('.object-overlay')
+    const matrix =
+      svg && typeof svg.getScreenCTM === 'function' ? svg.getScreenCTM() : null
+    if (svg && matrix && typeof svg.createSVGPoint === 'function') {
+      const point = svg.createSVGPoint()
+      point.x = clientX
+      point.y = clientY
+      const local = point.matrixTransform(matrix.inverse())
+      return { x: local.x, y: local.y }
+    }
+    const rect = element?.getBoundingClientRect()
+    if (rect && rect.width > 0 && rect.height > 0)
+      return {
+        x: ((clientX - rect.left) / rect.width) * 100,
+        y: ((clientY - rect.top) / rect.height) * 100
+      }
+    return null
+  }
   const cloneShapes = (shapes: CutShape[]) =>
     shapes.map((shape) => ({
       ...shape,
@@ -922,11 +1096,11 @@ function Scene() {
     if (layerEl) selectLayer(layerEl.dataset.canvasLayer as string)
   }
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    event.preventDefault()
     const target = event.target as HTMLElement
     const currentState = useUIStore.getState()
     const activeTool = currentState.tool
     if (mode === 'stage') {
+      event.preventDefault()
       gesture.current = {
         kind: 'orbit',
         startClient: { x: event.clientX, y: event.clientY },
@@ -958,8 +1132,9 @@ function Scene() {
     const handle = target.closest<SVGElement>('[data-handle]')?.dataset.handle
     const handlePosition =
       target.closest<SVGElement>('[data-handle]')?.dataset.handlePosition
-    const capture = () =>
+    const capture = () => {
       event.currentTarget.setPointerCapture?.(event.pointerId)
+    }
 
     if (sketchEl) {
       const id = sketchEl.dataset.sketchId as string
@@ -978,7 +1153,11 @@ function Scene() {
         layerId,
         startClient: { x: event.clientX, y: event.clientY },
         startShapes: cloneShapes(object.shapes),
-        handlePosition
+        handlePosition,
+        pointerStart:
+          clientPointForLayer(event.clientX, event.clientY, layerId) ??
+          undefined,
+        ...directGestureGeometry(sketchEl, event, handle, handlePosition)
       }
       capture()
       return
@@ -987,6 +1166,13 @@ function Scene() {
     if (pieceEl) {
       const id = pieceEl.dataset.pieceId as string
       if (!currentState.selectedPieces.includes(id)) return
+      const layerId = pieceEl.dataset.layerId as string
+      const layer = currentState.sceneLayers.find((item) => item.id === layerId)
+      const piece = layer?.pieces.find((item) => item.id === id)
+      const element = stageRef.current?.querySelector<HTMLElement>(
+        '[data-canvas-layer="' + layerId + '"]'
+      )
+      if (!piece || !layer) return
       gesture.current = {
         kind:
           handle === 'rotate'
@@ -995,9 +1181,25 @@ function Scene() {
               ? 'piece-scale'
               : 'piece-move',
         id,
-        layerId: pieceEl.dataset.layerId as string,
+        layerId,
         startClient: { x: event.clientX, y: event.clientY },
-        handlePosition
+        handlePosition,
+        pointerStart:
+          clientPointForLayer(event.clientX, event.clientY, layerId) ??
+          undefined,
+        objectTransform: {
+          x: piece.x,
+          y: piece.y,
+          rotation: piece.rotation,
+          scaleX: piece.scaleX,
+          scaleY: piece.scaleY,
+          aspect: Math.max(
+            0.01,
+            (element?.clientWidth || 1) / (element?.clientHeight || 1)
+          ),
+          bounds: shapeBounds(piece.shapes)
+        },
+        ...directGestureGeometry(pieceEl, event, handle, handlePosition)
       }
       capture()
       return
@@ -1045,7 +1247,7 @@ function Scene() {
 
     if (mode === 'sketch') return
 
-    const startLayerGesture = (layerId: string) => {
+    const startLayerGesture = (layerId: string, owner: Element) => {
       const layer = currentState.sceneLayers.find((item) => item.id === layerId)
       if (!layer) return false
       gesture.current = {
@@ -1059,14 +1261,18 @@ function Scene() {
         startClient: { x: event.clientX, y: event.clientY },
         transform: { ...layer.transform },
         depth: layer.depth,
-        handlePosition
+        handlePosition,
+        ...directGestureGeometry(owner, event, handle, handlePosition)
       }
       capture()
       return true
     }
 
     if (layerControlEl) {
-      startLayerGesture(layerControlEl.dataset.layerControlId as string)
+      startLayerGesture(
+        layerControlEl.dataset.layerControlId as string,
+        layerControlEl
+      )
       return
     }
 
@@ -1078,6 +1284,13 @@ function Scene() {
     if (remainderEl) {
       const layerId = remainderEl.dataset.remainderId as string
       if (currentState.selectedRemainderLayerId === layerId) {
+        const layer = currentState.sceneLayers.find(
+          (item) => item.id === layerId
+        )
+        const element = stageRef.current?.querySelector<HTMLElement>(
+          '[data-canvas-layer="' + layerId + '"]'
+        )
+        if (!layer) return
         gesture.current = {
           kind:
             handle === 'rotate'
@@ -1087,13 +1300,36 @@ function Scene() {
                 : 'remainder-move',
           layerId,
           startClient: { x: event.clientX, y: event.clientY },
-          handlePosition
+          handlePosition,
+          pointerStart:
+            clientPointForLayer(event.clientX, event.clientY, layerId) ??
+            undefined,
+          objectTransform: {
+            x: layer.sheetTransform.x,
+            y: layer.sheetTransform.y,
+            rotation: layer.sheetTransform.rotation,
+            scaleX: layer.sheetTransform.scaleX,
+            scaleY: layer.sheetTransform.scaleY,
+            aspect: Math.max(
+              0.01,
+              (element?.clientWidth || 1) / (element?.clientHeight || 1)
+            ),
+            bounds: {
+              x: 0,
+              y: 0,
+              width: 100,
+              height: 100,
+              cx: 50,
+              cy: 50
+            }
+          },
+          ...directGestureGeometry(remainderEl, event, handle, handlePosition)
         }
         capture()
         return
       }
       if (!hasSubObjectSelection && currentState.selected === layerId)
-        startLayerGesture(layerId)
+        startLayerGesture(layerId, layerEl ?? remainderEl)
       return
     }
 
@@ -1102,7 +1338,7 @@ function Scene() {
       !hasSubObjectSelection &&
       currentState.selected === layerEl.dataset.canvasLayer
     ) {
-      startLayerGesture(layerEl.dataset.canvasLayer as string)
+      startLayerGesture(layerEl.dataset.canvasLayer as string, layerEl)
     }
   }
   const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -1132,6 +1368,21 @@ function Scene() {
       } else setLiveShape({ ...liveShape, points: [current.startPoint, next] })
       return
     }
+    const localDelta = (layerId: string) => {
+      const point = clientPointForLayer(event.clientX, event.clientY, layerId)
+      if (point && current.pointerStart)
+        return {
+          x: point.x - current.pointerStart.x,
+          y: point.y - current.pointerStart.y
+        }
+      const element = stageRef.current?.querySelector<HTMLElement>(
+        '[data-canvas-layer="' + layerId + '"]'
+      )
+      return {
+        x: (dx / (element?.clientWidth || 1)) * 100,
+        y: (dy / (element?.clientHeight || 1)) * 100
+      }
+    }
     if (
       current.kind.startsWith('sketch') &&
       current.id &&
@@ -1142,8 +1393,9 @@ function Scene() {
         '[data-canvas-layer="' + current.layerId + '"]'
       )
       if (!element) return
-      const px = (dx / element.clientWidth) * 100,
-        py = (dy / element.clientHeight) * 100
+      const delta = localDelta(current.layerId)
+      const px = delta.x,
+        py = delta.y
       let shapes = cloneShapes(current.startShapes)
       if (current.kind === 'sketch-move')
         shapes = shapes.map((shape) => ({
@@ -1157,14 +1409,19 @@ function Scene() {
         const bounds = shapeBounds(shapes)
         const fromWest = current.handlePosition?.includes('w')
         const fromNorth = current.handlePosition?.includes('n')
-        const sx = Math.max(
-            0.08,
-            (bounds.width + (fromWest ? -px : px)) / bounds.width
-          ),
-          sy = Math.max(
-            0.08,
-            (bounds.height + (fromNorth ? -py : py)) / bounds.height
-          ),
+        const ratios = gestureScaleRatios(current, event)
+        const sx =
+            ratios?.x ??
+            Math.max(
+              0.08,
+              (bounds.width + (fromWest ? -px : px)) / bounds.width
+            ),
+          sy =
+            ratios?.y ??
+            Math.max(
+              0.08,
+              (bounds.height + (fromNorth ? -py : py)) / bounds.height
+            ),
           anchorX = fromWest ? bounds.x + bounds.width : bounds.x,
           anchorY = fromNorth ? bounds.y + bounds.height : bounds.y
         shapes = shapes.map((shape) => ({
@@ -1178,7 +1435,7 @@ function Scene() {
       if (current.kind === 'sketch-rotate') {
         shapes = shapes.map(materializePrimitive)
         const bounds = shapeBounds(shapes),
-          radians = dx * 0.012,
+          radians = (rotationGestureDelta(current, event, dx) * Math.PI) / 180,
           aspect = Math.max(
             0.01,
             (element.clientWidth || 1) / (element.clientHeight || 1)
@@ -1205,79 +1462,218 @@ function Scene() {
       return
     }
     if (current.kind === 'remainder-move' && current.layerId) {
-      const element = stageRef.current?.querySelector<HTMLElement>(
-        '[data-canvas-layer="' + current.layerId + '"]'
-      )
-      if (element) {
+      const start = current.objectTransform
+      const layer = useUIStore
+        .getState()
+        .sceneLayers.find((item) => item.id === current.layerId)
+      if (start && layer) {
+        const delta = localDelta(current.layerId)
         moveRemainder(
           current.layerId,
-          (dx / element.clientWidth) * 100,
-          (dy / element.clientHeight) * 100
+          start.x + delta.x - layer.sheetTransform.x,
+          start.y + delta.y - layer.sheetTransform.y
         )
-        current.startClient = { x: event.clientX, y: event.clientY }
       }
     }
     if (current.kind === 'remainder-rotate' && current.layerId) {
-      rotateRemainder(current.layerId, dx * 0.45)
-      current.startClient.x = event.clientX
+      const start = current.objectTransform
+      const layer = useUIStore
+        .getState()
+        .sceneLayers.find((item) => item.id === current.layerId)
+      if (start && layer)
+        rotateRemainder(
+          current.layerId,
+          start.rotation +
+            rotationGestureDelta(current, event, dx) -
+            layer.sheetTransform.rotation
+        )
     }
     if (current.kind === 'remainder-scale' && current.layerId) {
-      scaleRemainder(
-        current.layerId,
-        dx * (current.handlePosition?.includes('w') ? -0.01 : 0.01),
-        dy * (current.handlePosition?.includes('n') ? -0.01 : 0.01)
-      )
-      current.startClient = { x: event.clientX, y: event.clientY }
+      const start = current.objectTransform
+      const layer = useUIStore
+        .getState()
+        .sceneLayers.find((item) => item.id === current.layerId)
+      if (start && layer) {
+        const ratios = gestureScaleRatios(current, event)
+        const targetScaleX = Math.max(
+          0.1,
+          Math.min(
+            4,
+            ratios
+              ? start.scaleX * ratios.x
+              : start.scaleX +
+                  dx * (current.handlePosition?.includes('w') ? -0.01 : 0.01)
+          )
+        )
+        const targetScaleY = Math.max(
+          0.1,
+          Math.min(
+            4,
+            ratios
+              ? start.scaleY * ratios.y
+              : start.scaleY +
+                  dy * (current.handlePosition?.includes('n') ? -0.01 : 0.01)
+          )
+        )
+        const fixed = fixedCornerPoint(start.bounds, current.handlePosition)
+        const before = transformedOffset(fixed, start)
+        const after = transformedOffset(
+          fixed,
+          start,
+          targetScaleX,
+          targetScaleY
+        )
+        const targetX = start.x + before.x - after.x
+        const targetY = start.y + before.y - after.y
+        moveRemainder(
+          current.layerId,
+          targetX - layer.sheetTransform.x,
+          targetY - layer.sheetTransform.y
+        )
+        scaleRemainder(
+          current.layerId,
+          targetScaleX - layer.sheetTransform.scaleX,
+          targetScaleY - layer.sheetTransform.scaleY
+        )
+      }
     }
     if (current.kind === 'piece-move' && current.id && current.layerId) {
-      const element = stageRef.current?.querySelector<HTMLElement>(
-        '[data-canvas-layer="' + current.layerId + '"]'
-      )
-      if (element) {
+      const start = current.objectTransform
+      const piece = useUIStore
+        .getState()
+        .sceneLayers.flatMap((layer) => layer.pieces)
+        .find((item) => item.id === current.id)
+      if (start && piece) {
+        const delta = localDelta(current.layerId)
         movePiece(
           current.id,
-          (dx / element.clientWidth) * 100,
-          (dy / element.clientHeight) * 100
+          start.x + delta.x - piece.x,
+          start.y + delta.y - piece.y
         )
-        current.startClient = { x: event.clientX, y: event.clientY }
       }
     }
     if (current.kind === 'piece-rotate' && current.id) {
-      rotatePiece(current.id, dx * 0.45)
-      current.startClient.x = event.clientX
+      const start = current.objectTransform
+      const piece = useUIStore
+        .getState()
+        .sceneLayers.flatMap((layer) => layer.pieces)
+        .find((item) => item.id === current.id)
+      if (start && piece)
+        rotatePiece(
+          current.id,
+          start.rotation +
+            rotationGestureDelta(current, event, dx) -
+            piece.rotation
+        )
     }
     if (current.kind === 'piece-scale' && current.id) {
-      scalePiece(
-        current.id,
-        dx * (current.handlePosition?.includes('w') ? -0.01 : 0.01),
-        dy * (current.handlePosition?.includes('n') ? -0.01 : 0.01)
-      )
-      current.startClient = { x: event.clientX, y: event.clientY }
+      const start = current.objectTransform
+      const piece = useUIStore
+        .getState()
+        .sceneLayers.flatMap((layer) => layer.pieces)
+        .find((item) => item.id === current.id)
+      if (start && piece) {
+        const ratios = gestureScaleRatios(current, event)
+        const targetScaleX = Math.max(
+          0.1,
+          Math.min(
+            4,
+            ratios
+              ? start.scaleX * ratios.x
+              : start.scaleX +
+                  dx * (current.handlePosition?.includes('w') ? -0.01 : 0.01)
+          )
+        )
+        const targetScaleY = Math.max(
+          0.1,
+          Math.min(
+            4,
+            ratios
+              ? start.scaleY * ratios.y
+              : start.scaleY +
+                  dy * (current.handlePosition?.includes('n') ? -0.01 : 0.01)
+          )
+        )
+        const fixed = fixedCornerPoint(start.bounds, current.handlePosition)
+        const before = transformedOffset(fixed, start)
+        const after = transformedOffset(
+          fixed,
+          start,
+          targetScaleX,
+          targetScaleY
+        )
+        movePiece(
+          current.id,
+          start.x + before.x - after.x - piece.x,
+          start.y + before.y - after.y - piece.y
+        )
+        scalePiece(
+          current.id,
+          targetScaleX - piece.scaleX,
+          targetScaleY - piece.scaleY
+        )
+      }
     }
     if (current.layerId && current.transform) {
       if (current.kind === 'layer-move') {
-        setLayerTransform(current.layerId, 'x', current.transform.x + dx)
-        setLayerTransform(current.layerId, 'y', current.transform.y + dy)
+        setLayerTransform(current.layerId, 'x', current.transform.x + dx / zoom)
+        setLayerTransform(current.layerId, 'y', current.transform.y + dy / zoom)
       }
       if (current.kind === 'layer-rotate')
         setLayerTransform(
           current.layerId,
           'rotation',
-          current.transform.rotation + dx * 0.45
+          current.transform.rotation + rotationGestureDelta(current, event, dx)
         )
       if (current.kind === 'layer-scale') {
-        setLayerTransform(
-          current.layerId,
-          'width',
-          current.transform.width +
-            dx * (current.handlePosition?.includes('w') ? -0.15 : 0.15)
+        const ratios = gestureScaleRatios(current, event)
+        const targetWidth = Math.max(
+          10,
+          Math.min(
+            150,
+            ratios
+              ? current.transform.width * ratios.x
+              : current.transform.width +
+                  dx * (current.handlePosition?.includes('w') ? -0.15 : 0.15)
+          )
         )
-        setLayerTransform(
-          current.layerId,
-          'height',
-          current.transform.height +
-            dy * (current.handlePosition?.includes('n') ? -0.15 : 0.15)
+        const targetHeight = Math.max(
+          10,
+          Math.min(
+            150,
+            ratios
+              ? current.transform.height * ratios.y
+              : current.transform.height +
+                  dy * (current.handlePosition?.includes('n') ? -0.15 : 0.15)
+          )
         )
+        const stage =
+          stageRef.current?.querySelector<HTMLElement>('.stage-orbit')
+        const deltaWidth =
+          ((stage?.clientWidth || stageSize.width) *
+            (targetWidth - current.transform.width)) /
+          100
+        const deltaHeight =
+          ((stage?.clientHeight || stageSize.height) *
+            (targetHeight - current.transform.height)) /
+          100
+        const localX =
+          (current.handlePosition?.includes('w') ? -1 : 1) * deltaWidth * 0.5
+        const localY =
+          (current.handlePosition?.includes('n') ? -1 : 1) * deltaHeight * 0.5
+        const radians = (current.transform.rotation * Math.PI) / 180
+        const centerX =
+          current.transform.x +
+          localX * Math.cos(radians) -
+          localY * Math.sin(radians)
+        const centerY =
+          current.transform.y +
+          localX * Math.sin(radians) +
+          localY * Math.cos(radians)
+        setLayerTransform(current.layerId, 'x', centerX)
+        setLayerTransform(current.layerId, 'y', centerY)
+        setLayerTransform(current.layerId, 'width', targetWidth)
+        setLayerTransform(current.layerId, 'height', targetHeight)
       }
     }
   }
@@ -1405,7 +1801,11 @@ function Scene() {
           {sceneLayers
             .filter((layer) => layer.visible)
             .slice()
-            .sort((a, b) => a.depth - b.depth)
+            .sort(
+              (a, b) =>
+                a.depth - b.depth ||
+                sceneLayers.indexOf(b) - sceneLayers.indexOf(a)
+            )
             .map((layer) => {
               const transform = layer.transform
               const layerAspect = Math.max(
@@ -1433,6 +1833,7 @@ function Scene() {
               return (
                 <div
                   data-canvas-layer={layer.id}
+                  data-layer-depth={layer.depth}
                   key={layer.id}
                   className={
                     'paper-layer ' +
@@ -1444,7 +1845,9 @@ function Scene() {
                     height: transform.height + '%',
                     opacity: contextLayer ? 0.18 : transform.opacity / 100,
                     pointerEvents:
-                      mode !== 'stage' && !layerIsInteractive ? 'none' : 'auto',
+                      mode === 'sketch' && !layerIsInteractive
+                        ? 'none'
+                        : 'auto',
                     transform:
                       mode === 'stage'
                         ? 'translate(-50%, -50%) translate3d(' +
@@ -1632,7 +2035,13 @@ function Scene() {
               )
             })}
         </div>
-        {safeFrame && <div className="safe-frame" />}
+        {safeFrame && (
+          <div
+            className="safe-frame"
+            style={{ pointerEvents: 'none' }}
+            aria-hidden="true"
+          />
+        )}
         {mode === 'stage' && <div className="stage-grid" />}
       </div>
     </main>

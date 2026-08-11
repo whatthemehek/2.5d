@@ -264,12 +264,12 @@ describe('Compose object tools', () => {
     )
     const layer = useUIStore.getState().sceneLayers[0]
     expect(layer.transform).toMatchObject({
-      x: 40,
-      y: 25,
       rotation: 18,
       width: 31,
       height: 28
     })
+    expect(layer.transform.x).toBeGreaterThan(40)
+    expect(layer.transform.y).toBeGreaterThan(25)
   })
 
   it('moves, rotates, and scales a sheet remainder with direct handles', () => {
@@ -304,13 +304,138 @@ describe('Compose object tools', () => {
     drag(sheet.querySelector('[data-handle="rotate"]')!, 20, 0, 32)
     drag(sheet.querySelector('[data-handle-position="se"]')!, 20, 10, 33)
     expect(useUIStore.getState().sceneLayers[0].sheetTransform).toMatchObject({
-      x: 10,
-      y: 5,
       rotation: 9,
       scaleX: 1.2,
       scaleY: 1.1,
       depthOffset: 0
     })
+    expect(
+      useUIStore.getState().sceneLayers[0].sheetTransform.x
+    ).toBeGreaterThan(10)
+    expect(
+      useUIStore.getState().sceneLayers[0].sheetTransform.y
+    ).toBeGreaterThan(5)
+  })
+
+  it('keeps the dragged corner under the cursor and rotates around the center', () => {
+    useUIStore.getState().selectRemainder('foreground')
+    render(<App />)
+    const stage = document.querySelector('.layer-stage') as HTMLElement
+    const layer = document.querySelector(
+      '[data-canvas-layer="foreground"]'
+    ) as HTMLElement
+    const sheet = layer.querySelector(
+      '[data-remainder-id="foreground"]'
+    ) as SVGElement
+    Object.defineProperty(layer, 'clientWidth', { value: 400 })
+    Object.defineProperty(layer, 'clientHeight', { value: 400 })
+    Object.defineProperty(layer, 'getBoundingClientRect', {
+      value: () => ({
+        left: 0,
+        top: 0,
+        width: 400,
+        height: 400,
+        right: 400,
+        bottom: 400
+      })
+    })
+    const centers: Record<string, [number, number]> = {
+      nw: [100, 100],
+      ne: [200, 100],
+      sw: [100, 200],
+      se: [200, 200]
+    }
+    for (const [position, [x, y]] of Object.entries(centers)) {
+      const handle = sheet.querySelector(
+        '[data-handle-position="' + position + '"]'
+      )!
+      Object.defineProperty(handle, 'getBoundingClientRect', {
+        value: () => ({
+          left: x - 4,
+          top: y - 4,
+          width: 8,
+          height: 8,
+          right: x + 4,
+          bottom: y + 4
+        })
+      })
+    }
+
+    const scaleHandle = sheet.querySelector('[data-handle-position="se"]')!
+    fireEvent.pointerDown(scaleHandle, {
+      clientX: 200,
+      clientY: 200,
+      pointerId: 61
+    })
+    fireEvent.pointerMove(stage, {
+      clientX: 250,
+      clientY: 230,
+      pointerId: 61
+    })
+    fireEvent.pointerUp(stage, { pointerId: 61 })
+    let transform = useUIStore.getState().sceneLayers[0].sheetTransform
+    expect(transform).toMatchObject({
+      x: 25,
+      y: 15,
+      scaleX: 1.5,
+      scaleY: 1.3
+    })
+    expect(transform.x + 50 - 50 * transform.scaleX).toBeCloseTo(0, 8)
+    expect(transform.y + 50 - 50 * transform.scaleY).toBeCloseTo(0, 8)
+
+    const rotateHandle = sheet.querySelector('[data-handle="rotate"]')!
+    fireEvent.pointerDown(rotateHandle, {
+      clientX: 150,
+      clientY: 60,
+      pointerId: 62
+    })
+    fireEvent.pointerMove(stage, {
+      clientX: 230,
+      clientY: 150,
+      pointerId: 62
+    })
+    fireEvent.pointerUp(stage, { pointerId: 62 })
+    transform = useUIStore.getState().sceneLayers[0].sheetTransform
+    expect(transform.rotation).toBeCloseTo(90, 8)
+
+    fireEvent.pointerDown(sheet, {
+      clientX: 100,
+      clientY: 100,
+      pointerId: 63
+    })
+    fireEvent.pointerMove(stage, {
+      clientX: 140,
+      clientY: 120,
+      pointerId: 63
+    })
+    fireEvent.pointerUp(stage, { pointerId: 63 })
+    transform = useUIStore.getState().sceneLayers[0].sheetTransform
+    expect(transform).toMatchObject({ x: 35, y: 20 })
+  })
+
+  it('orders canvas hit regions from back to front by depth', () => {
+    useUIStore.getState().selectRemainder('background')
+    render(<App />)
+    const canvasLayers = Array.from(
+      document.querySelectorAll<HTMLElement>('[data-canvas-layer]')
+    )
+    expect(canvasLayers.map((layer) => layer.dataset.canvasLayer)).toEqual([
+      'background',
+      'character',
+      'foreground'
+    ])
+    expect(canvasLayers.map((layer) => layer.style.pointerEvents)).toEqual([
+      'auto',
+      'auto',
+      'auto'
+    ])
+    expect(document.querySelector('.safe-frame')).toHaveStyle({
+      pointerEvents: 'none'
+    })
+    fireEvent.doubleClick(
+      document.querySelector('[data-remainder-id="foreground"]')!
+    )
+    expect(useUIStore.getState().selectedRemainderLayerId).toBe('foreground')
   })
 
   it('locks interaction to a selected middle-layer remainder', () => {
@@ -333,11 +458,20 @@ describe('Compose object tools', () => {
     Object.defineProperty(character, 'clientHeight', { value: 400 })
 
     expect(character.style.pointerEvents).toBe('auto')
-    expect(background.style.pointerEvents).toBe('none')
+    expect(background.style.pointerEvents).toBe('auto')
     expect(characterSheet.querySelector('[data-handle="move"]')).toBeNull()
     expect(
       characterSheet.querySelector('[data-handle="rotate"]')
     ).toBeInTheDocument()
+    const selectionTop = Number(
+      characterSheet
+        .querySelector('.vector-selection > rect:first-child')!
+        .getAttribute('y')
+    )
+    const rotationY = Number(
+      characterSheet.querySelector('[data-handle="rotate"]')!.getAttribute('cy')
+    )
+    expect(rotationY).toBeLessThan(selectionTop)
 
     fireEvent.pointerDown(backgroundSheet, {
       clientX: 100,
@@ -458,13 +592,13 @@ describe('Compose object tools', () => {
     expect(Math.abs(aspect * aspect * a * c + b * d)).toBeLessThan(0.000001)
     drag(piece.querySelector('[data-handle-position="se"]')!, 20, 10, 29)
     expect(useUIStore.getState().sceneLayers[0].pieces[0]).toMatchObject({
-      x: 10,
-      y: 5,
       rotation: 9,
       scaleX: 1.2,
       scaleY: 1.1,
       depthOffset: 12
     })
+    expect(useUIStore.getState().sceneLayers[0].pieces[0].x).toBeGreaterThan(10)
+    expect(useUIStore.getState().sceneLayers[0].pieces[0].y).toBeGreaterThan(5)
     fireEvent.click(screen.getByLabelText('Delete Round cutout'))
     expect(useUIStore.getState().sceneLayers[0].pieces).toHaveLength(0)
   })

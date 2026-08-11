@@ -553,6 +553,7 @@ select:focus-visible {
   position: absolute;
   inset: 8%;
   border: 1px dashed #ffffff88;
+  pointer-events: none;
 }
 .stage .artboard {
   transform: perspective(900px) rotateX(7deg) rotateY(-9deg) scale(0.94);
@@ -1121,9 +1122,9 @@ select:focus-visible {
 }
 .layer-viewport .layer-stage {
   position: relative;
-  width: min(76vw, 800px);
-  height: min(60vh, 550px);
-  overflow: hidden;
+  width: min(76vw, 800px, calc(100% - 80px));
+  height: min(60vh, 550px, calc(100% - 96px));
+  overflow: visible;
   border: 8px solid #30343b;
   background: #e8deca;
   box-shadow: 0 22px 45px #0008;
@@ -1660,7 +1661,7 @@ select:focus-visible {
 .cut-object,
 .sketch-object {
   pointer-events: all;
-  cursor: move;
+  cursor: pointer;
 }
 .cut-object > *:not(.vector-selection),
 .sketch-object > *:not(.vector-selection) {
@@ -1671,6 +1672,7 @@ select:focus-visible {
 }
 .cut-object.selected {
   filter: drop-shadow(0 0 1px #fff) drop-shadow(0 0 2px #dd7f4b);
+  cursor: move;
 }
 .sketch-object {
   color: #e88750;
@@ -1681,6 +1683,7 @@ select:focus-visible {
 }
 .sketch-object.selected {
   color: #ff9c62;
+  cursor: move;
 }
 .vector-selection > rect:first-child {
   fill: none;
@@ -1762,6 +1765,9 @@ select:focus-visible {
   color: #ffc0b4 !important;
 }
 .sheet-hit {
+  cursor: pointer;
+}
+.sheet-hit.selected {
   cursor: move;
 }
 .sheet-hit.selected > rect:first-child {
@@ -1787,4 +1793,7 @@ select:focus-visible {
 .layer-viewport .paper-layer.selected,
 .layer-viewport.stage .paper-layer {
   box-shadow: none !important;
+}
+.layer-viewport .paper-layer.selected {
+  outline: none;
 }
