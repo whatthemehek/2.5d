@@ -228,7 +228,7 @@ describe('Papercut wireframe', () => {
 })
 
 describe('Compose object tools', () => {
-  it('moves, rotates, scales, and changes depth for a logical layer', () => {
+  it('moves, rotates, and scales a logical layer', () => {
     render(<App />)
     const stage = document.querySelector('.layer-stage') as HTMLElement
     const sheet = document.querySelector('[data-remainder-id="foreground"]')!
@@ -254,7 +254,6 @@ describe('Compose object tools', () => {
     drag('Move', [100, 100], [140, 125], 21)
     drag('Rotate', [100, 100], [140, 100], 22)
     drag('Scale', [100, 100], [140, 120], 23)
-    drag('Depth', [100, 100], [120, 100], 24)
     const layer = useUIStore.getState().sceneLayers[0]
     expect(layer.transform).toMatchObject({
       x: 40,
@@ -263,10 +262,9 @@ describe('Compose object tools', () => {
       width: 31,
       height: 28
     })
-    expect(layer.depth).toBe(940)
   })
 
-  it('moves, rotates, scales, and changes depth for a sheet remainder', () => {
+  it('moves, rotates, and scales a sheet remainder', () => {
     render(<App />)
     fireEvent.click(screen.getAllByText('Sheet remainder')[0])
     const stage = document.querySelector('.layer-stage') as HTMLElement
@@ -289,14 +287,13 @@ describe('Compose object tools', () => {
     drag('Move', 40, 20, 31)
     drag('Rotate', 20, 0, 32)
     drag('Scale', 20, 10, 33)
-    drag('Depth', 10, 0, 34)
     expect(useUIStore.getState().sceneLayers[0].sheetTransform).toMatchObject({
       x: 10,
       y: 5,
       rotation: 9,
       scaleX: 1.2,
       scaleY: 1.1,
-      depthOffset: 20
+      depthOffset: 0
     })
   })
 
@@ -348,44 +345,18 @@ describe('Compose object tools', () => {
     })
   })
 
-  it('draws directly on the selected layer while remaining in Compose', () => {
+  it('shows only object transform tools outside Sketch mode', () => {
     render(<App />)
-    fireEvent.click(screen.getAllByText('Sheet remainder')[0])
-    fireEvent.click(screen.getByLabelText('Rectangle tool'))
-    const layer = document.querySelector(
-      '[data-canvas-layer="foreground"]'
-    ) as HTMLElement
-    const stage = document.querySelector('.layer-stage') as HTMLElement
-    Object.defineProperty(layer, 'getBoundingClientRect', {
-      value: () => ({
-        left: 0,
-        top: 0,
-        width: 400,
-        height: 400,
-        right: 400,
-        bottom: 400
-      })
-    })
-    fireEvent.pointerDown(layer, {
-      clientX: 80,
-      clientY: 100,
-      pointerId: 43
-    })
-    fireEvent.pointerMove(stage, {
-      clientX: 220,
-      clientY: 260,
-      pointerId: 43
-    })
-    expect(document.querySelector('.sketch-object.live')).toBeInTheDocument()
-    fireEvent.pointerUp(stage, {
-      clientX: 220,
-      clientY: 260,
-      pointerId: 43
-    })
-    expect(useUIStore.getState().mode).toBe('compose')
-    expect(useUIStore.getState().selectedRemainderLayerId).toBeNull()
-    expect(useUIStore.getState().sceneLayers[0].sketches).toHaveLength(1)
-    expect(document.querySelector('[data-sketch-id]')).toBeInTheDocument()
+    for (const tool of ['Select', 'Move', 'Rotate', 'Scale'])
+      expect(screen.getByLabelText(tool + ' tool')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Depth tool')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Rectangle tool')).not.toBeInTheDocument()
+    expect(screen.queryByText('Cut selected')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('Sketch'))
+    expect(screen.getByLabelText('Rectangle tool')).toBeInTheDocument()
+    expect(screen.getByLabelText('Circle tool')).toBeInTheDocument()
+    expect(screen.getByText('Cut selected')).toBeInTheDocument()
   })
 
   it('transforms and individually deletes a cutout', () => {
@@ -411,6 +382,8 @@ describe('Compose object tools', () => {
       activeSketchLayerId: 'foreground'
     })
     useUIStore.getState().cutSelectedContours()
+    const cutoutId = useUIStore.getState().sceneLayers[0].pieces[0].id
+    useUIStore.getState().selectRemainder('foreground')
     render(<App />)
     const stage = document.querySelector('.layer-stage') as HTMLElement
     const layerElement = document.querySelector(
@@ -419,6 +392,15 @@ describe('Compose object tools', () => {
     Object.defineProperty(layerElement, 'clientWidth', { value: 400 })
     Object.defineProperty(layerElement, 'clientHeight', { value: 400 })
     const piece = document.querySelector('[data-piece-id]')!
+    expect((piece as SVGElement).style.pointerEvents).toBe('all')
+    fireEvent.pointerDown(piece, {
+      clientX: 100,
+      clientY: 100,
+      pointerId: 26
+    })
+    fireEvent.pointerUp(stage, { pointerId: 26 })
+    expect(useUIStore.getState().selectedPieces).toEqual([cutoutId])
+
     const drag = (tool: string, dx: number, dy: number, pointerId: number) => {
       fireEvent.click(screen.getByLabelText(tool + ' tool'))
       fireEvent.pointerDown(piece, { clientX: 100, clientY: 100, pointerId })
@@ -432,14 +414,13 @@ describe('Compose object tools', () => {
     drag('Move', 40, 20, 27)
     drag('Rotate', 20, 0, 28)
     drag('Scale', 20, 10, 29)
-    drag('Depth', 10, 0, 30)
     expect(useUIStore.getState().sceneLayers[0].pieces[0]).toMatchObject({
       x: 10,
       y: 5,
       rotation: 9,
       scaleX: 1.2,
       scaleY: 1.1,
-      depthOffset: 32
+      depthOffset: 12
     })
     fireEvent.click(screen.getByLabelText('Delete Round cutout'))
     expect(useUIStore.getState().sceneLayers[0].pieces).toHaveLength(0)

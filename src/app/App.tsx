@@ -439,9 +439,7 @@ function WorkspaceToolStrip() {
     mergeSelectedSketches,
     closeSelectedContours,
     cutSelectedContours,
-    deleteSelectedSketches,
-    joinSelectedPieces,
-    selectedPieces
+    deleteSelectedSketches
   } = useUIStore()
   const selectedSketches =
     sceneLayers
@@ -463,59 +461,49 @@ function WorkspaceToolStrip() {
           <ToolButton key={item.name} {...item} />
         ))}
       </div>
-      {mode === 'compose' && (
-        <div className="tool-group">
-          <ToolButton
-            name="Depth"
-            icon={I.Layers3}
-            hint="Drag horizontally to change layer depth"
-          />
-        </div>
-      )}
-      <div className="tool-group draw-group">
-        {drawTools.map((item) => (
-          <ToolButton key={item.name} {...item} />
-        ))}
-      </div>
-      <div className="tool-group action-group">
-        <button
-          disabled={selectedSketchIds.length < 2}
-          onClick={mergeSelectedSketches}
-        >
-          <I.Combine size={15} /> Merge
-        </button>
-        <button
-          disabled={!selectedSketchIds.length}
-          onClick={closeSelectedContours}
-        >
-          <I.LassoSelect size={15} /> Close contour
-        </button>
-        <button
-          className="cut-command"
-          disabled={!canCut}
-          onClick={cutSelectedContours}
-        >
-          <I.Scissors size={15} /> Cut selected
-        </button>
-        <button
-          disabled={!selectedSketchIds.length}
-          onClick={deleteSelectedSketches}
-          aria-label="Delete selected sketches"
-        >
-          <I.Trash2 size={15} />
-        </button>
-      </div>
-      {mode === 'compose' && selectedPieces.length > 1 && (
-        <button onClick={joinSelectedPieces}>
-          <I.Combine size={15} /> Join pieces
-        </button>
+      {mode === 'sketch' && (
+        <>
+          <div className="tool-group draw-group">
+            {drawTools.map((item) => (
+              <ToolButton key={item.name} {...item} />
+            ))}
+          </div>
+          <div className="tool-group action-group">
+            <button
+              disabled={selectedSketchIds.length < 2}
+              onClick={mergeSelectedSketches}
+            >
+              <I.Combine size={15} /> Merge
+            </button>
+            <button
+              disabled={!selectedSketchIds.length}
+              onClick={closeSelectedContours}
+            >
+              <I.LassoSelect size={15} /> Close contour
+            </button>
+            <button
+              className="cut-command"
+              disabled={!canCut}
+              onClick={cutSelectedContours}
+            >
+              <I.Scissors size={15} /> Cut selected
+            </button>
+            <button
+              disabled={!selectedSketchIds.length}
+              onClick={deleteSelectedSketches}
+              aria-label="Delete selected sketches"
+            >
+              <I.Trash2 size={15} />
+            </button>
+          </div>
+        </>
       )}
       <span className="workspace-context">
-        {selectedSketchIds.length
-          ? selectedSketchIds.length + ' sketch object selected'
-          : mode === 'sketch'
-            ? 'Draw on the isolated layer'
-            : 'Transform or draw on the selected layer'}
+        {mode === 'sketch'
+          ? selectedSketchIds.length
+            ? selectedSketchIds.length + ' sketch object selected'
+            : 'Draw on the isolated layer'
+          : 'Select, move, rotate, or scale the active object'}
       </span>
     </div>
   )
@@ -604,6 +592,9 @@ function ShapeGeometry({
 
 function PaperSurface({ layer }: { layer: Layer }) {
   const sheet = layer.sheetTransform
+  const apparentDepth = Math.max(0, layer.depth + sheet.depthOffset)
+  const shadowOffset = Math.max(1, Math.min(8, apparentDepth / 120))
+  const shadowBlur = Math.max(1.5, Math.min(9, apparentDepth / 100))
   return (
     <svg
       className="paper-sheet"
@@ -639,6 +630,7 @@ function PaperSurface({ layer }: { layer: Layer }) {
         </mask>
       </defs>
       <g
+        data-paper-surface={layer.id}
         transform={
           'translate(' +
           sheet.x +
@@ -656,10 +648,10 @@ function PaperSurface({ layer }: { layer: Layer }) {
         style={{
           filter:
             'drop-shadow(0 ' +
-            Math.max(0, sheet.depthOffset / 8) +
+            shadowOffset +
             'px ' +
-            Math.max(1, Math.abs(sheet.depthOffset) / 12) +
-            'px rgba(0,0,0,.38))'
+            shadowBlur +
+            'px rgba(0,0,0,.42))'
         }}
       >
         <rect width="100" height="100" fill={'url(#paper-' + layer.id + ')'} />
@@ -772,6 +764,7 @@ function Scene() {
     toggleSafe,
     setOrbit,
     resetOrbit,
+    selectRemainder,
     moveRemainder,
     rotateRemainder,
     scaleRemainder,
@@ -984,15 +977,18 @@ function Scene() {
     if (clickedLayerId && lockedLayerId && clickedLayerId !== lockedLayerId)
       return
 
-    const activeDrawingType = (
-      {
-        Rectangle: 'rect',
-        Circle: 'circle',
-        Line: 'line',
-        Pen: 'pen',
-        Spline: 'spline'
-      } as Partial<Record<EditorTool, CutShape['type']>>
-    )[activeTool]
+    const activeDrawingType =
+      mode === 'sketch'
+        ? (
+            {
+              Rectangle: 'rect',
+              Circle: 'circle',
+              Line: 'line',
+              Pen: 'pen',
+              Spline: 'spline'
+            } as Partial<Record<EditorTool, CutShape['type']>>
+          )[activeTool]
+        : undefined
     const editLayerId =
       mode === 'sketch' ? currentState.activeSketchLayerId : lockedLayerId
     const editLayer = currentState.sceneLayers.find(
@@ -1023,13 +1019,6 @@ function Scene() {
 
     if (sketchEl && editLayer) {
       const id = sketchEl.dataset.sketchId as string
-      if (
-        currentState.selectedRemainderLayerId ||
-        currentState.selectedPieces.length ||
-        (currentState.selectedSketchIds.length > 0 &&
-          !currentState.selectedSketchIds.includes(id))
-      )
-        return
       const handle = target.closest<SVGElement>('[data-handle]')?.dataset.handle
       const object = editLayer.sketches.find((item) => item.id === id)
       if (!object) return
@@ -1087,13 +1076,6 @@ function Scene() {
     if (pieceEl) {
       const id = pieceEl.dataset.pieceId as string
       const layerId = pieceEl.dataset.layerId as string
-      if (
-        currentState.selectedRemainderLayerId ||
-        currentState.selectedSketchIds.length ||
-        (currentState.selectedPieces.length > 0 &&
-          !currentState.selectedPieces.includes(id))
-      )
-        return
       const handle = target.closest<SVGElement>('[data-handle]')?.dataset.handle
       if (!currentState.selectedPieces.includes(id))
         togglePieceSelection(id, event.shiftKey)
@@ -1134,7 +1116,10 @@ function Scene() {
         event.currentTarget.setPointerCapture?.(event.pointerId)
         return
       }
-      if (hasSubObjectSelection) return
+      if (hasSubObjectSelection) {
+        if (activeTool === 'Select') selectRemainder(layerId)
+        return
+      }
       startLayerGesture(layerId)
       return
     }
@@ -1507,9 +1492,11 @@ function Scene() {
                       }
                       style={{
                         pointerEvents:
-                          hasSubObjectSelection && !selectedRemainderOnLayer
-                            ? 'none'
-                            : 'all'
+                          tool === 'Select' ||
+                          !hasSubObjectSelection ||
+                          selectedRemainderOnLayer
+                            ? 'all'
+                            : 'none'
                       }}
                       transform={
                         'translate(' +
@@ -1560,10 +1547,11 @@ function Scene() {
                             }
                             style={{
                               pointerEvents:
-                                hasSubObjectSelection &&
-                                !selectedPieces.includes(piece.id)
-                                  ? 'none'
-                                  : 'all',
+                                tool === 'Select' ||
+                                !hasSubObjectSelection ||
+                                selectedPieces.includes(piece.id)
+                                  ? 'all'
+                                  : 'none',
                               filter: selectedPieces.includes(piece.id)
                                 ? 'drop-shadow(0 0 1px #fff) drop-shadow(0 ' +
                                   Math.max(1, piece.depthOffset / 6) +
@@ -1629,7 +1617,8 @@ function Scene() {
                           renderSketch(
                             object,
                             false,
-                            !hasSubObjectSelection ||
+                            tool === 'Select' ||
+                              !hasSubObjectSelection ||
                               selectedSketchIds.includes(object.id)
                           )
                         )}

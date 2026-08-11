@@ -1779,3 +1779,10 @@ select:focus-visible {
   vector-effect: non-scaling-stroke;
   pointer-events: none;
 }
+
+/* Shadows belong to transformed SVG paper geometry, never layer containers. */
+.layer-viewport .paper-layer,
+.layer-viewport .paper-layer.selected,
+.layer-viewport.stage .paper-layer {
+  box-shadow: none !important;
+}
