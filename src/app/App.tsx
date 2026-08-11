@@ -2,6 +2,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode
 } from 'react'
@@ -27,16 +28,6 @@ const drawTools: { name: EditorTool; icon: typeof I.Square; hint: string }[] = [
   { name: 'Line', icon: I.Minus, hint: 'Drag a straight open segment' },
   { name: 'Pen', icon: I.PenTool, hint: 'Drag a freehand contour' },
   { name: 'Spline', icon: I.Spline, hint: 'Drag a smooth editable curve' }
-]
-const editTools: {
-  name: EditorTool
-  icon: typeof I.MousePointer2
-  hint: string
-}[] = [
-  { name: 'Select', icon: I.MousePointer2, hint: 'Select and drag an object' },
-  { name: 'Move', icon: I.Move, hint: 'Move the selected object' },
-  { name: 'Rotate', icon: I.RotateCw, hint: 'Drag horizontally to rotate' },
-  { name: 'Scale', icon: I.Maximize, hint: 'Drag to resize' }
 ]
 const menus = {
   File: ['New Project', 'Open Project', 'Save', 'Import Artwork', 'Export'],
@@ -456,11 +447,6 @@ function WorkspaceToolStrip() {
     )
   return (
     <div className={'workspace-tools ' + mode}>
-      <div className="tool-group">
-        {editTools.map((item) => (
-          <ToolButton key={item.name} {...item} />
-        ))}
-      </div>
       {mode === 'sketch' && (
         <>
           <div className="tool-group draw-group">
@@ -501,9 +487,9 @@ function WorkspaceToolStrip() {
       <span className="workspace-context">
         {mode === 'sketch'
           ? selectedSketchIds.length
-            ? selectedSketchIds.length + ' sketch object selected'
-            : 'Draw on the isolated layer'
-          : 'Select, move, rotate, or scale the active object'}
+            ? 'Drag selection · corners scale · top handle rotates'
+            : 'Draw, or double-click a contour to select it'
+          : 'Double-click to select · drag to move · corners scale · top handle rotates'}
       </span>
     </div>
   )
@@ -526,6 +512,80 @@ function shapeBounds(shapes: CutShape[]) {
     cx: x + width / 2,
     cy: y + height / 2
   }
+}
+
+function screenSpaceMatrix({
+  x,
+  y,
+  rotation,
+  scaleX,
+  scaleY,
+  cx,
+  cy,
+  aspect
+}: {
+  x: number
+  y: number
+  rotation: number
+  scaleX: number
+  scaleY: number
+  cx: number
+  cy: number
+  aspect: number
+}) {
+  const safeAspect = Math.max(0.01, aspect)
+  const radians = (rotation * Math.PI) / 180
+  const cosine = Math.cos(radians)
+  const sine = Math.sin(radians)
+  const a = cosine * scaleX
+  const b = sine * scaleX * safeAspect
+  const c = (-sine * scaleY) / safeAspect
+  const d = cosine * scaleY
+  const e = x + cx - a * cx - c * cy
+  const f = y + cy - b * cx - d * cy
+  return `matrix(${a} ${b} ${c} ${d} ${e} ${f})`
+}
+
+function materializePrimitive(shape: CutShape): CutShape {
+  const first = shape.points[0]
+  const last = shape.points[shape.points.length - 1]
+  if (!first || !last) return shape
+  if (shape.type === 'rect') {
+    const left = Math.min(first.x, last.x)
+    const right = Math.max(first.x, last.x)
+    const top = Math.min(first.y, last.y)
+    const bottom = Math.max(first.y, last.y)
+    return {
+      ...shape,
+      type: 'pen',
+      closed: true,
+      points: [
+        { x: left, y: top },
+        { x: right, y: top },
+        { x: right, y: bottom },
+        { x: left, y: bottom }
+      ]
+    }
+  }
+  if (shape.type === 'circle') {
+    const cx = (first.x + last.x) / 2
+    const cy = (first.y + last.y) / 2
+    const rx = Math.abs(last.x - first.x) / 2
+    const ry = Math.abs(last.y - first.y) / 2
+    return {
+      ...shape,
+      type: 'pen',
+      closed: true,
+      points: Array.from({ length: 48 }, (_, index) => {
+        const radians = (index / 48) * Math.PI * 2
+        return {
+          x: cx + Math.cos(radians) * rx,
+          y: cy + Math.sin(radians) * ry
+        }
+      })
+    }
+  }
+  return shape
 }
 
 function ShapeGeometry({
@@ -590,7 +650,7 @@ function ShapeGeometry({
   )
 }
 
-function PaperSurface({ layer }: { layer: Layer }) {
+function PaperSurface({ layer, aspect }: { layer: Layer; aspect: number }) {
   const sheet = layer.sheetTransform
   const apparentDepth = Math.max(0, layer.depth + sheet.depthOffset)
   const shadowOffset = Math.max(1, Math.min(8, apparentDepth / 120))
@@ -631,19 +691,16 @@ function PaperSurface({ layer }: { layer: Layer }) {
       </defs>
       <g
         data-paper-surface={layer.id}
-        transform={
-          'translate(' +
-          sheet.x +
-          ' ' +
-          sheet.y +
-          ') rotate(' +
-          sheet.rotation +
-          ' 50 50) translate(50 50) scale(' +
-          sheet.scaleX +
-          ' ' +
-          sheet.scaleY +
-          ') translate(-50 -50)'
-        }
+        transform={screenSpaceMatrix({
+          x: sheet.x,
+          y: sheet.y,
+          rotation: sheet.rotation,
+          scaleX: sheet.scaleX,
+          scaleY: sheet.scaleY,
+          cx: 50,
+          cy: 50,
+          aspect
+        })}
         mask={'url(#mask-' + layer.id + ')'}
         style={{
           filter:
@@ -682,19 +739,20 @@ function SelectionBounds({ shapes }: { shapes: CutShape[] }) {
     <g className="vector-selection">
       <rect x={left} y={top} width={right - left} height={bottom - top} />
       {[
-        [left, top],
-        [right, top],
-        [left, bottom],
-        [right, bottom]
-      ].map(([x, y], index) => (
+        [left, top, 'nw'],
+        [right, top, 'ne'],
+        [left, bottom, 'sw'],
+        [right, bottom, 'se']
+      ].map(([x, y, position]) => (
         <rect
           data-handle="scale"
+          data-handle-position={position}
           className="vector-handle"
-          key={index}
-          x={x - 0.8}
-          y={y - 0.8}
-          width="1.6"
-          height="1.6"
+          key={position}
+          x={Number(x) - 1.5}
+          y={Number(y) - 1.5}
+          width="3"
+          height="3"
         />
       ))}
       <line x1={bounds.cx} y1={top} x2={bounds.cx} y2={rotateLineY} />
@@ -703,31 +761,7 @@ function SelectionBounds({ shapes }: { shapes: CutShape[] }) {
         className="rotate-handle"
         cx={bounds.cx}
         cy={rotateY}
-        r="1.2"
-      />
-      <circle
-        data-handle="move"
-        className="move-handle"
-        cx={bounds.cx}
-        cy={bounds.cy}
-        r="2.5"
-      />
-      <path
-        className="move-handle-icon"
-        d={
-          'M ' +
-          (bounds.cx - 1.4) +
-          ' ' +
-          bounds.cy +
-          ' H ' +
-          (bounds.cx + 1.4) +
-          ' M ' +
-          bounds.cx +
-          ' ' +
-          (bounds.cy - 1.4) +
-          ' V ' +
-          (bounds.cy + 1.4)
-        }
+        r="1.8"
       />
     </g>
   )
@@ -742,12 +776,12 @@ type Gesture = {
   startShapes?: CutShape[]
   transform?: Layer['transform']
   depth?: number
+  handlePosition?: string
 }
 
 function Scene() {
   const {
     mode,
-    tool,
     sceneLayers,
     selected,
     activeSketchLayerId,
@@ -764,27 +798,27 @@ function Scene() {
     toggleSafe,
     setOrbit,
     resetOrbit,
+    setTool,
+    selectLayer,
     selectRemainder,
     moveRemainder,
     rotateRemainder,
     scaleRemainder,
-    changeRemainderDepth,
     selectedRemainderLayerId,
     toggleSketchSelection,
     togglePieceSelection,
     addSketchObject,
     updateSketchObjectShapes,
     setLayerTransform,
-    setLayerDepth,
     movePiece,
     rotatePiece,
-    scalePiece,
-    changePieceDepth
+    scalePiece
   } = useUIStore()
   const viewportRef = useRef<HTMLElement | null>(null)
   const stageRef = useRef<HTMLDivElement | null>(null)
   const gesture = useRef<Gesture | null>(null)
   const [liveShape, setLiveShape] = useState<CutShape | null>(null)
+  const [stageSize, setStageSize] = useState({ width: 800, height: 550 })
   const resolveInteractionLayerId = (
     state: ReturnType<typeof useUIStore.getState>
   ) => {
@@ -818,6 +852,20 @@ function Scene() {
     viewer.addEventListener('wheel', handleWheel, { passive: false })
     return () => viewer.removeEventListener('wheel', handleWheel)
   }, [])
+  useEffect(() => {
+    const stage = stageRef.current
+    if (!stage) return
+    const updateSize = () => {
+      const rect = stage.getBoundingClientRect()
+      if (rect.width > 0 && rect.height > 0)
+        setStageSize({ width: rect.width, height: rect.height })
+    }
+    updateSize()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(updateSize)
+    observer.observe(stage)
+    return () => observer.disconnect()
+  }, [])
   const depths = sceneLayers.map((layer) => layer.depth)
   const depthSpan = depths.length
     ? Math.max(...depths) - Math.min(...depths)
@@ -849,6 +897,30 @@ function Scene() {
       ...shape,
       points: shape.points.map((point) => ({ ...point }))
     }))
+  const onDoubleClick = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (mode === 'stage') return
+    event.preventDefault()
+    event.stopPropagation()
+    const target = event.target as Element
+    const pieceEl = target.closest<SVGElement>('[data-piece-id]')
+    const sketchEl = target.closest<SVGElement>('[data-sketch-id]')
+    const remainderEl = target.closest<SVGElement>('[data-remainder-id]')
+    const layerEl = target.closest<HTMLElement>('[data-canvas-layer]')
+    if (pieceEl) {
+      togglePieceSelection(pieceEl.dataset.pieceId as string, event.shiftKey)
+      return
+    }
+    if (sketchEl) {
+      toggleSketchSelection(sketchEl.dataset.sketchId as string, event.shiftKey)
+      setTool('Select')
+      return
+    }
+    if (remainderEl) {
+      selectRemainder(remainderEl.dataset.remainderId as string)
+      return
+    }
+    if (layerEl) selectLayer(layerEl.dataset.canvasLayer as string)
+  }
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault()
     const target = event.target as HTMLElement
@@ -880,102 +952,56 @@ function Scene() {
     const clickedLayerId =
       pieceEl?.dataset.layerId ?? layerEl?.dataset.canvasLayer
     const lockedLayerId = resolveInteractionLayerId(currentState)
-    const explicitTransform =
-      activeTool === 'Move' ||
-      activeTool === 'Rotate' ||
-      activeTool === 'Scale' ||
-      activeTool === 'Depth'
-    if (explicitTransform) {
-      const selectedSketchId =
-        currentState.selectedSketchIds.length === 1
-          ? currentState.selectedSketchIds[0]
-          : null
-      const selectedPieceId =
-        currentState.selectedPieces.length === 1
-          ? currentState.selectedPieces[0]
-          : null
-      const selectedSketchLayer = selectedSketchId
-        ? currentState.sceneLayers.find((layer) =>
-            layer.sketches.some((sketch) => sketch.id === selectedSketchId)
-          )
-        : undefined
-      const selectedPieceLayer = selectedPieceId
-        ? currentState.sceneLayers.find((layer) =>
-            layer.pieces.some((piece) => piece.id === selectedPieceId)
-          )
-        : undefined
-      const selectedLayer = currentState.sceneLayers.find(
-        (layer) => layer.id === lockedLayerId
-      )
-
-      if (selectedSketchId && selectedSketchLayer && activeTool !== 'Depth') {
-        const object = selectedSketchLayer.sketches.find(
-          (sketch) => sketch.id === selectedSketchId
-        )
-        if (object)
-          gesture.current = {
-            kind:
-              activeTool === 'Rotate'
-                ? 'sketch-rotate'
-                : activeTool === 'Scale'
-                  ? 'sketch-scale'
-                  : 'sketch-move',
-            id: selectedSketchId,
-            layerId: selectedSketchLayer.id,
-            startClient: { x: event.clientX, y: event.clientY },
-            startShapes: cloneShapes(object.shapes)
-          }
-      } else if (selectedPieceId && selectedPieceLayer) {
-        gesture.current = {
-          kind:
-            activeTool === 'Rotate'
-              ? 'piece-rotate'
-              : activeTool === 'Scale'
-                ? 'piece-scale'
-                : activeTool === 'Depth'
-                  ? 'piece-depth'
-                  : 'piece-move',
-          id: selectedPieceId,
-          layerId: selectedPieceLayer.id,
-          startClient: { x: event.clientX, y: event.clientY }
-        }
-      } else if (currentState.selectedRemainderLayerId) {
-        gesture.current = {
-          kind:
-            activeTool === 'Rotate'
-              ? 'remainder-rotate'
-              : activeTool === 'Scale'
-                ? 'remainder-scale'
-                : activeTool === 'Depth'
-                  ? 'remainder-depth'
-                  : 'remainder-move',
-          layerId: currentState.selectedRemainderLayerId,
-          startClient: { x: event.clientX, y: event.clientY }
-        }
-      } else if (selectedLayer) {
-        gesture.current = {
-          kind:
-            activeTool === 'Rotate'
-              ? 'layer-rotate'
-              : activeTool === 'Scale'
-                ? 'layer-scale'
-                : activeTool === 'Depth'
-                  ? 'layer-depth'
-                  : 'layer-move',
-          layerId: selectedLayer.id,
-          startClient: { x: event.clientX, y: event.clientY },
-          transform: { ...selectedLayer.transform },
-          depth: selectedLayer.depth
-        }
-      }
-
-      if (gesture.current) {
-        event.currentTarget.setPointerCapture?.(event.pointerId)
-        return
-      }
-    }
     if (clickedLayerId && lockedLayerId && clickedLayerId !== lockedLayerId)
       return
+
+    const handle = target.closest<SVGElement>('[data-handle]')?.dataset.handle
+    const handlePosition =
+      target.closest<SVGElement>('[data-handle]')?.dataset.handlePosition
+    const capture = () =>
+      event.currentTarget.setPointerCapture?.(event.pointerId)
+
+    if (sketchEl) {
+      const id = sketchEl.dataset.sketchId as string
+      const layerId = layerEl?.dataset.canvasLayer as string
+      const layer = currentState.sceneLayers.find((item) => item.id === layerId)
+      const object = layer?.sketches.find((item) => item.id === id)
+      if (!object || !currentState.selectedSketchIds.includes(id)) return
+      gesture.current = {
+        kind:
+          handle === 'rotate'
+            ? 'sketch-rotate'
+            : handle === 'scale'
+              ? 'sketch-scale'
+              : 'sketch-move',
+        id,
+        layerId,
+        startClient: { x: event.clientX, y: event.clientY },
+        startShapes: cloneShapes(object.shapes),
+        handlePosition
+      }
+      capture()
+      return
+    }
+
+    if (pieceEl) {
+      const id = pieceEl.dataset.pieceId as string
+      if (!currentState.selectedPieces.includes(id)) return
+      gesture.current = {
+        kind:
+          handle === 'rotate'
+            ? 'piece-rotate'
+            : handle === 'scale'
+              ? 'piece-scale'
+              : 'piece-move',
+        id,
+        layerId: pieceEl.dataset.layerId as string,
+        startClient: { x: event.clientX, y: event.clientY },
+        handlePosition
+      }
+      capture()
+      return
+    }
 
     const activeDrawingType =
       mode === 'sketch'
@@ -1013,29 +1039,7 @@ function Scene() {
         startClient: { x: event.clientX, y: event.clientY },
         startPoint: point
       }
-      event.currentTarget.setPointerCapture?.(event.pointerId)
-      return
-    }
-
-    if (sketchEl && editLayer) {
-      const id = sketchEl.dataset.sketchId as string
-      const handle = target.closest<SVGElement>('[data-handle]')?.dataset.handle
-      const object = editLayer.sketches.find((item) => item.id === id)
-      if (!object) return
-      toggleSketchSelection(id, event.shiftKey)
-      gesture.current = {
-        kind:
-          handle === 'rotate' || activeTool === 'Rotate'
-            ? 'sketch-rotate'
-            : handle === 'scale' || activeTool === 'Scale'
-              ? 'sketch-scale'
-              : 'sketch-move',
-        id,
-        layerId: editLayer.id,
-        startClient: { x: event.clientX, y: event.clientY },
-        startShapes: cloneShapes(object.shapes)
-      }
-      event.currentTarget.setPointerCapture?.(event.pointerId)
+      capture()
       return
     }
 
@@ -1044,22 +1048,20 @@ function Scene() {
     const startLayerGesture = (layerId: string) => {
       const layer = currentState.sceneLayers.find((item) => item.id === layerId)
       if (!layer) return false
-      const handle = target.closest<SVGElement>('[data-handle]')?.dataset.handle
       gesture.current = {
         kind:
-          handle === 'rotate' || activeTool === 'Rotate'
+          handle === 'rotate'
             ? 'layer-rotate'
-            : handle === 'scale' || activeTool === 'Scale'
+            : handle === 'scale'
               ? 'layer-scale'
-              : activeTool === 'Depth'
-                ? 'layer-depth'
-                : 'layer-move',
+              : 'layer-move',
         layerId,
         startClient: { x: event.clientX, y: event.clientY },
         transform: { ...layer.transform },
-        depth: layer.depth
+        depth: layer.depth,
+        handlePosition
       }
-      event.currentTarget.setPointerCapture?.(event.pointerId)
+      capture()
       return true
     }
 
@@ -1073,58 +1075,33 @@ function Scene() {
       currentState.selectedPieces.length > 0 ||
       currentState.selectedSketchIds.length > 0
 
-    if (pieceEl) {
-      const id = pieceEl.dataset.pieceId as string
-      const layerId = pieceEl.dataset.layerId as string
-      const handle = target.closest<SVGElement>('[data-handle]')?.dataset.handle
-      if (!currentState.selectedPieces.includes(id))
-        togglePieceSelection(id, event.shiftKey)
-      gesture.current = {
-        kind:
-          handle === 'rotate' || activeTool === 'Rotate'
-            ? 'piece-rotate'
-            : handle === 'scale' || activeTool === 'Scale'
-              ? 'piece-scale'
-              : activeTool === 'Depth'
-                ? 'piece-depth'
-                : 'piece-move',
-        id,
-        layerId,
-        startClient: { x: event.clientX, y: event.clientY }
-      }
-      event.currentTarget.setPointerCapture?.(event.pointerId)
-      return
-    }
-
     if (remainderEl) {
       const layerId = remainderEl.dataset.remainderId as string
       if (currentState.selectedRemainderLayerId === layerId) {
-        const handle =
-          target.closest<SVGElement>('[data-handle]')?.dataset.handle
         gesture.current = {
           kind:
-            handle === 'rotate' || activeTool === 'Rotate'
+            handle === 'rotate'
               ? 'remainder-rotate'
-              : handle === 'scale' || activeTool === 'Scale'
+              : handle === 'scale'
                 ? 'remainder-scale'
-                : activeTool === 'Depth'
-                  ? 'remainder-depth'
-                  : 'remainder-move',
+                : 'remainder-move',
           layerId,
-          startClient: { x: event.clientX, y: event.clientY }
+          startClient: { x: event.clientX, y: event.clientY },
+          handlePosition
         }
-        event.currentTarget.setPointerCapture?.(event.pointerId)
+        capture()
         return
       }
-      if (hasSubObjectSelection) {
-        if (activeTool === 'Select') selectRemainder(layerId)
-        return
-      }
-      startLayerGesture(layerId)
+      if (!hasSubObjectSelection && currentState.selected === layerId)
+        startLayerGesture(layerId)
       return
     }
 
-    if (layerEl && !hasSubObjectSelection) {
+    if (
+      layerEl &&
+      !hasSubObjectSelection &&
+      currentState.selected === layerEl.dataset.canvasLayer
+    ) {
       startLayerGesture(layerEl.dataset.canvasLayer as string)
     }
   }
@@ -1178,31 +1155,50 @@ function Scene() {
         }))
       if (current.kind === 'sketch-scale') {
         const bounds = shapeBounds(shapes)
-        const sx = Math.max(0.08, (bounds.width + px) / bounds.width),
-          sy = Math.max(0.08, (bounds.height + py) / bounds.height)
+        const fromWest = current.handlePosition?.includes('w')
+        const fromNorth = current.handlePosition?.includes('n')
+        const sx = Math.max(
+            0.08,
+            (bounds.width + (fromWest ? -px : px)) / bounds.width
+          ),
+          sy = Math.max(
+            0.08,
+            (bounds.height + (fromNorth ? -py : py)) / bounds.height
+          ),
+          anchorX = fromWest ? bounds.x + bounds.width : bounds.x,
+          anchorY = fromNorth ? bounds.y + bounds.height : bounds.y
         shapes = shapes.map((shape) => ({
           ...shape,
           points: shape.points.map((point) => ({
-            x: bounds.x + (point.x - bounds.x) * sx,
-            y: bounds.y + (point.y - bounds.y) * sy
+            x: anchorX + (point.x - anchorX) * sx,
+            y: anchorY + (point.y - anchorY) * sy
           }))
         }))
       }
       if (current.kind === 'sketch-rotate') {
+        shapes = shapes.map(materializePrimitive)
         const bounds = shapeBounds(shapes),
-          radians = dx * 0.012
+          radians = dx * 0.012,
+          aspect = Math.max(
+            0.01,
+            (element.clientWidth || 1) / (element.clientHeight || 1)
+          )
         shapes = shapes.map((shape) => ({
           ...shape,
-          points: shape.points.map((point) => ({
-            x:
-              bounds.cx +
-              (point.x - bounds.cx) * Math.cos(radians) -
-              (point.y - bounds.cy) * Math.sin(radians),
-            y:
-              bounds.cy +
-              (point.x - bounds.cx) * Math.sin(radians) +
-              (point.y - bounds.cy) * Math.cos(radians)
-          }))
+          points: shape.points.map((point) => {
+            const screenX = (point.x - bounds.cx) * aspect
+            const screenY = point.y - bounds.cy
+            return {
+              x:
+                bounds.cx +
+                (screenX * Math.cos(radians) - screenY * Math.sin(radians)) /
+                  aspect,
+              y:
+                bounds.cy +
+                screenX * Math.sin(radians) +
+                screenY * Math.cos(radians)
+            }
+          })
         }))
       }
       updateSketchObjectShapes(current.layerId, current.id, shapes)
@@ -1226,12 +1222,12 @@ function Scene() {
       current.startClient.x = event.clientX
     }
     if (current.kind === 'remainder-scale' && current.layerId) {
-      scaleRemainder(current.layerId, dx * 0.01, dy * 0.01)
+      scaleRemainder(
+        current.layerId,
+        dx * (current.handlePosition?.includes('w') ? -0.01 : 0.01),
+        dy * (current.handlePosition?.includes('n') ? -0.01 : 0.01)
+      )
       current.startClient = { x: event.clientX, y: event.clientY }
-    }
-    if (current.kind === 'remainder-depth' && current.layerId) {
-      changeRemainderDepth(current.layerId, dx * 2)
-      current.startClient.x = event.clientX
     }
     if (current.kind === 'piece-move' && current.id && current.layerId) {
       const element = stageRef.current?.querySelector<HTMLElement>(
@@ -1251,12 +1247,12 @@ function Scene() {
       current.startClient.x = event.clientX
     }
     if (current.kind === 'piece-scale' && current.id) {
-      scalePiece(current.id, dx * 0.01, dy * 0.01)
+      scalePiece(
+        current.id,
+        dx * (current.handlePosition?.includes('w') ? -0.01 : 0.01),
+        dy * (current.handlePosition?.includes('n') ? -0.01 : 0.01)
+      )
       current.startClient = { x: event.clientX, y: event.clientY }
-    }
-    if (current.kind === 'piece-depth' && current.id) {
-      changePieceDepth(current.id, dx * 2)
-      current.startClient.x = event.clientX
     }
     if (current.layerId && current.transform) {
       if (current.kind === 'layer-move') {
@@ -1273,16 +1269,16 @@ function Scene() {
         setLayerTransform(
           current.layerId,
           'width',
-          current.transform.width + dx * 0.15
+          current.transform.width +
+            dx * (current.handlePosition?.includes('w') ? -0.15 : 0.15)
         )
         setLayerTransform(
           current.layerId,
           'height',
-          current.transform.height + dy * 0.15
+          current.transform.height +
+            dy * (current.handlePosition?.includes('n') ? -0.15 : 0.15)
         )
       }
-      if (current.kind === 'layer-depth')
-        setLayerDepth(current.layerId, (current.depth ?? 0) + dx * 2)
     }
   }
   const onPointerUp = () => {
@@ -1377,10 +1373,10 @@ function Scene() {
       <div className="tool-hint">
         <I.MousePointer2 size={14} />
         {mode === 'sketch'
-          ? 'Sketch mode · active layer is editable; context layers are frozen'
+          ? 'Sketch · draw primitives or double-click a contour to select it'
           : mode === 'stage'
             ? 'Stage · drag to orbit'
-            : tool + ' · select or transform paper objects'}
+            : 'Double-click an object, then drag it or use its handles'}
       </div>
       <div
         ref={stageRef}
@@ -1389,6 +1385,7 @@ function Scene() {
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
+        onDoubleClick={onDoubleClick}
       >
         <div
           className="stage-orbit"
@@ -1411,6 +1408,11 @@ function Scene() {
             .sort((a, b) => a.depth - b.depth)
             .map((layer) => {
               const transform = layer.transform
+              const layerAspect = Math.max(
+                0.01,
+                (stageSize.width * transform.width) /
+                  (stageSize.height * transform.height)
+              )
               const contextLayer =
                 mode === 'sketch' && layer.id !== activeSketchLayerId
               const selectedPieceOnLayer = layer.pieces.some((piece) =>
@@ -1463,7 +1465,7 @@ function Scene() {
                           'deg)'
                   }}
                 >
-                  <PaperSurface layer={layer} />
+                  <PaperSurface layer={layer} aspect={layerAspect} />
                   <svg
                     className="object-overlay"
                     viewBox="0 0 100 100"
@@ -1491,26 +1493,18 @@ function Scene() {
                         (selectedRemainderOnLayer ? 'selected' : '')
                       }
                       style={{
-                        pointerEvents:
-                          tool === 'Select' ||
-                          !hasSubObjectSelection ||
-                          selectedRemainderOnLayer
-                            ? 'all'
-                            : 'none'
+                        pointerEvents: 'all'
                       }}
-                      transform={
-                        'translate(' +
-                        layer.sheetTransform.x +
-                        ' ' +
-                        layer.sheetTransform.y +
-                        ') rotate(' +
-                        layer.sheetTransform.rotation +
-                        ' 50 50) translate(50 50) scale(' +
-                        layer.sheetTransform.scaleX +
-                        ' ' +
-                        layer.sheetTransform.scaleY +
-                        ') translate(-50 -50)'
-                      }
+                      transform={screenSpaceMatrix({
+                        x: layer.sheetTransform.x,
+                        y: layer.sheetTransform.y,
+                        rotation: layer.sheetTransform.rotation,
+                        scaleX: layer.sheetTransform.scaleX,
+                        scaleY: layer.sheetTransform.scaleY,
+                        cx: 50,
+                        cy: 50,
+                        aspect: layerAspect
+                      })}
                     >
                       <rect width="100" height="100" fill="transparent" />
                       {selectedRemainderLayerId === layer.id && (
@@ -1546,12 +1540,7 @@ function Scene() {
                                 : '')
                             }
                             style={{
-                              pointerEvents:
-                                tool === 'Select' ||
-                                !hasSubObjectSelection ||
-                                selectedPieces.includes(piece.id)
-                                  ? 'all'
-                                  : 'none',
+                              pointerEvents: 'all',
                               filter: selectedPieces.includes(piece.id)
                                 ? 'drop-shadow(0 0 1px #fff) drop-shadow(0 ' +
                                   Math.max(1, piece.depthOffset / 6) +
@@ -1564,23 +1553,16 @@ function Scene() {
                                   Math.max(1, Math.abs(piece.depthOffset) / 8) +
                                   'px rgba(0,0,0,.48))'
                             }}
-                            transform={
-                              'translate(' +
-                              piece.x +
-                              ' ' +
-                              piece.y +
-                              ') rotate(' +
-                              piece.rotation +
-                              ' ' +
-                              bounds.cx +
-                              ' ' +
-                              bounds.cy +
-                              ') scale(' +
-                              piece.scaleX +
-                              ' ' +
-                              piece.scaleY +
-                              ')'
-                            }
+                            transform={screenSpaceMatrix({
+                              x: piece.x,
+                              y: piece.y,
+                              rotation: piece.rotation,
+                              scaleX: piece.scaleX,
+                              scaleY: piece.scaleY,
+                              cx: bounds.cx,
+                              cy: bounds.cy,
+                              aspect: layerAspect
+                            })}
                           >
                             {piece.shapes.map((shape) => (
                               <g key={shape.id}>
@@ -1613,15 +1595,7 @@ function Scene() {
                       layer.id === interactionLayerId &&
                       layer.sketches
                         .filter((object) => object.visible)
-                        .map((object) =>
-                          renderSketch(
-                            object,
-                            false,
-                            tool === 'Select' ||
-                              !hasSubObjectSelection ||
-                              selectedSketchIds.includes(object.id)
-                          )
-                        )}
+                        .map((object) => renderSketch(object, false, true))}
                     {(mode === 'sketch' || mode === 'compose') &&
                       layer.id === interactionLayerId &&
                       liveShape &&

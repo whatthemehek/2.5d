@@ -1730,10 +1730,28 @@ select:focus-visible {
 .vector-handle,
 .rotate-handle {
   pointer-events: all;
+  transition:
+    fill 0.12s ease,
+    stroke 0.12s ease;
+}
+.vector-handle[data-handle-position='nw'],
+.vector-handle[data-handle-position='se'] {
   cursor: nwse-resize;
 }
+.vector-handle[data-handle-position='ne'],
+.vector-handle[data-handle-position='sw'] {
+  cursor: nesw-resize;
+}
 .rotate-handle {
-  cursor: crosshair;
+  cursor: grab;
+}
+.rotate-handle:active {
+  cursor: grabbing;
+}
+.vector-handle:hover,
+.rotate-handle:hover {
+  fill: #ffb183;
+  stroke: #fff;
 }
 
 .hierarchy-delete {
@@ -1764,22 +1782,6 @@ select:focus-visible {
 .interaction-disabled {
   pointer-events: none !important;
 }
-.move-handle {
-  fill: #df8653;
-  stroke: #fff;
-  stroke-width: 0.35;
-  vector-effect: non-scaling-stroke;
-  pointer-events: all;
-  cursor: move;
-}
-.move-handle-icon {
-  fill: none;
-  stroke: #fff;
-  stroke-width: 0.45;
-  vector-effect: non-scaling-stroke;
-  pointer-events: none;
-}
-
 /* Shadows belong to transformed SVG paper geometry, never layer containers. */
 .layer-viewport .paper-layer,
 .layer-viewport .paper-layer.selected,

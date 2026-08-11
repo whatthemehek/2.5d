@@ -56,12 +56,8 @@ describe('Papercut wireframe', () => {
     fireEvent.click(screen.getByText('Stage'))
     expect(useUIStore.getState().mode).toBe('stage')
   })
-  it('selects a tool and object', () => {
+  it('selects a sheet remainder from the layer hierarchy', () => {
     render(<App />)
-    fireEvent.click(screen.getByText('tools'))
-    fireEvent.click(screen.getByText('Rotate'))
-    expect(useUIStore.getState().tool).toBe('Rotate')
-    fireEvent.click(screen.getByText('layers'))
     fireEvent.click(screen.getAllByText('Sheet remainder')[0])
     expect(useUIStore.getState().selectedRemainderLayerId).toBe('foreground')
   })
@@ -76,8 +72,7 @@ describe('Papercut wireframe', () => {
       tool: 'Select',
       selectedRemainderLayerId: 'foreground'
     })
-    fireEvent.click(screen.getByLabelText('Rotate tool'))
-    expect(useUIStore.getState().tool).toBe('Rotate')
+    expect(screen.queryByLabelText('Rotate tool')).not.toBeInTheDocument()
   })
 
   it('opens and closes dialogs', () => {
@@ -228,18 +223,17 @@ describe('Papercut wireframe', () => {
 })
 
 describe('Compose object tools', () => {
-  it('moves, rotates, and scales a logical layer', () => {
+  it('moves, rotates, and scales a logical layer with direct handles', () => {
     render(<App />)
     const stage = document.querySelector('.layer-stage') as HTMLElement
     const sheet = document.querySelector('[data-remainder-id="foreground"]')!
     const drag = (
-      tool: string,
+      target: Element,
       from: [number, number],
       to: [number, number],
       pointerId: number
     ) => {
-      fireEvent.click(screen.getByLabelText(tool + ' tool'))
-      fireEvent.pointerDown(sheet, {
+      fireEvent.pointerDown(target, {
         clientX: from[0],
         clientY: from[1],
         pointerId
@@ -251,9 +245,23 @@ describe('Compose object tools', () => {
       })
       fireEvent.pointerUp(stage, { pointerId })
     }
-    drag('Move', [100, 100], [140, 125], 21)
-    drag('Rotate', [100, 100], [140, 100], 22)
-    drag('Scale', [100, 100], [140, 120], 23)
+    drag(sheet, [100, 100], [140, 125], 21)
+    drag(
+      document.querySelector(
+        '[data-layer-control-id="foreground"] [data-handle="rotate"]'
+      )!,
+      [100, 100],
+      [140, 100],
+      22
+    )
+    drag(
+      document.querySelector(
+        '[data-layer-control-id="foreground"] [data-handle-position="se"]'
+      )!,
+      [100, 100],
+      [140, 120],
+      23
+    )
     const layer = useUIStore.getState().sceneLayers[0]
     expect(layer.transform).toMatchObject({
       x: 40,
@@ -264,7 +272,7 @@ describe('Compose object tools', () => {
     })
   })
 
-  it('moves, rotates, and scales a sheet remainder', () => {
+  it('moves, rotates, and scales a sheet remainder with direct handles', () => {
     render(<App />)
     fireEvent.click(screen.getAllByText('Sheet remainder')[0])
     const stage = document.querySelector('.layer-stage') as HTMLElement
@@ -274,9 +282,17 @@ describe('Compose object tools', () => {
     Object.defineProperty(layerElement, 'clientWidth', { value: 400 })
     Object.defineProperty(layerElement, 'clientHeight', { value: 400 })
     const sheet = document.querySelector('[data-remainder-id="foreground"]')!
-    const drag = (tool: string, dx: number, dy: number, pointerId: number) => {
-      fireEvent.click(screen.getByLabelText(tool + ' tool'))
-      fireEvent.pointerDown(sheet, { clientX: 100, clientY: 100, pointerId })
+    const drag = (
+      target: Element,
+      dx: number,
+      dy: number,
+      pointerId: number
+    ) => {
+      fireEvent.pointerDown(target, {
+        clientX: 100,
+        clientY: 100,
+        pointerId
+      })
       fireEvent.pointerMove(stage, {
         clientX: 100 + dx,
         clientY: 100 + dy,
@@ -284,9 +300,9 @@ describe('Compose object tools', () => {
       })
       fireEvent.pointerUp(stage, { pointerId })
     }
-    drag('Move', 40, 20, 31)
-    drag('Rotate', 20, 0, 32)
-    drag('Scale', 20, 10, 33)
+    drag(sheet, 40, 20, 31)
+    drag(sheet.querySelector('[data-handle="rotate"]')!, 20, 0, 32)
+    drag(sheet.querySelector('[data-handle-position="se"]')!, 20, 10, 33)
     expect(useUIStore.getState().sceneLayers[0].sheetTransform).toMatchObject({
       x: 10,
       y: 5,
@@ -318,14 +334,11 @@ describe('Compose object tools', () => {
 
     expect(character.style.pointerEvents).toBe('auto')
     expect(background.style.pointerEvents).toBe('none')
-    expect(
-      characterSheet.querySelector('[data-handle="move"]')
-    ).toBeInTheDocument()
+    expect(characterSheet.querySelector('[data-handle="move"]')).toBeNull()
     expect(
       characterSheet.querySelector('[data-handle="rotate"]')
     ).toBeInTheDocument()
 
-    fireEvent.click(screen.getByLabelText('Move tool'))
     fireEvent.pointerDown(backgroundSheet, {
       clientX: 100,
       clientY: 100,
@@ -339,16 +352,29 @@ describe('Compose object tools', () => {
     fireEvent.pointerUp(stage, { pointerId: 41 })
     expect(useUIStore.getState().selectedRemainderLayerId).toBe('character')
     expect(useUIStore.getState().sceneLayers[2].sheetTransform.x).toBe(0)
+    expect(useUIStore.getState().sceneLayers[1].sheetTransform.x).toBe(0)
+
+    fireEvent.pointerDown(characterSheet, {
+      clientX: 100,
+      clientY: 100,
+      pointerId: 42
+    })
+    fireEvent.pointerMove(stage, {
+      clientX: 140,
+      clientY: 120,
+      pointerId: 42
+    })
+    fireEvent.pointerUp(stage, { pointerId: 42 })
     expect(useUIStore.getState().sceneLayers[1].sheetTransform).toMatchObject({
       x: 10,
       y: 5
     })
   })
 
-  it('shows only object transform tools outside Sketch mode', () => {
+  it('shows shape tools only while editing a sketch', () => {
     render(<App />)
     for (const tool of ['Select', 'Move', 'Rotate', 'Scale'])
-      expect(screen.getByLabelText(tool + ' tool')).toBeInTheDocument()
+      expect(screen.queryByLabelText(tool + ' tool')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('Depth tool')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('Rectangle tool')).not.toBeInTheDocument()
     expect(screen.queryByText('Cut selected')).not.toBeInTheDocument()
@@ -357,6 +383,8 @@ describe('Compose object tools', () => {
     expect(screen.getByLabelText('Rectangle tool')).toBeInTheDocument()
     expect(screen.getByLabelText('Circle tool')).toBeInTheDocument()
     expect(screen.getByText('Cut selected')).toBeInTheDocument()
+    for (const tool of ['Select', 'Move', 'Rotate', 'Scale'])
+      expect(screen.queryByLabelText(tool + ' tool')).not.toBeInTheDocument()
   })
 
   it('transforms and individually deletes a cutout', () => {
@@ -399,11 +427,21 @@ describe('Compose object tools', () => {
       pointerId: 26
     })
     fireEvent.pointerUp(stage, { pointerId: 26 })
+    expect(useUIStore.getState().selectedPieces).toEqual([])
+    fireEvent.doubleClick(piece)
     expect(useUIStore.getState().selectedPieces).toEqual([cutoutId])
 
-    const drag = (tool: string, dx: number, dy: number, pointerId: number) => {
-      fireEvent.click(screen.getByLabelText(tool + ' tool'))
-      fireEvent.pointerDown(piece, { clientX: 100, clientY: 100, pointerId })
+    const drag = (
+      target: Element,
+      dx: number,
+      dy: number,
+      pointerId: number
+    ) => {
+      fireEvent.pointerDown(target, {
+        clientX: 100,
+        clientY: 100,
+        pointerId
+      })
       fireEvent.pointerMove(stage, {
         clientX: 100 + dx,
         clientY: 100 + dy,
@@ -411,9 +449,14 @@ describe('Compose object tools', () => {
       })
       fireEvent.pointerUp(stage, { pointerId })
     }
-    drag('Move', 40, 20, 27)
-    drag('Rotate', 20, 0, 28)
-    drag('Scale', 20, 10, 29)
+    drag(piece, 40, 20, 27)
+    drag(piece.querySelector('[data-handle="rotate"]')!, 20, 0, 28)
+    const matrix = piece.getAttribute('transform')!
+    expect(matrix).toMatch(/^matrix\(/)
+    const [a, b, c, d] = matrix.slice(7, -1).split(' ').slice(0, 4).map(Number)
+    const aspect = 800 / 550
+    expect(Math.abs(aspect * aspect * a * c + b * d)).toBeLessThan(0.000001)
+    drag(piece.querySelector('[data-handle-position="se"]')!, 20, 10, 29)
     expect(useUIStore.getState().sceneLayers[0].pieces[0]).toMatchObject({
       x: 10,
       y: 5,
@@ -488,8 +531,8 @@ describe('Layer sketch workspace', () => {
     useUIStore.setState({
       mode: 'sketch',
       activeSketchLayerId: 'foreground',
-      selectedSketchIds: ['editable'],
-      tool: 'Select'
+      selectedSketchIds: [],
+      tool: 'Circle'
     })
     render(<App />)
     const layer = document.querySelector(
@@ -497,28 +540,43 @@ describe('Layer sketch workspace', () => {
     ) as HTMLElement
     const stage = document.querySelector('.layer-stage') as HTMLElement
     Object.defineProperty(layer, 'clientWidth', { value: 400 })
-    Object.defineProperty(layer, 'clientHeight', { value: 400 })
+    Object.defineProperty(layer, 'clientHeight', { value: 200 })
     Object.defineProperty(layer, 'getBoundingClientRect', {
       value: () => ({
         left: 0,
         top: 0,
         width: 400,
-        height: 400,
+        height: 200,
         right: 400,
-        bottom: 400
+        bottom: 200
       })
     })
-    fireEvent.pointerDown(
-      document.querySelector('[data-sketch-id="editable"]')!,
-      { clientX: 100, clientY: 100, pointerId: 2 }
-    )
+    const sketch = document.querySelector('[data-sketch-id="editable"]')!
+    fireEvent.pointerDown(sketch, {
+      clientX: 100,
+      clientY: 100,
+      pointerId: 1
+    })
+    fireEvent.pointerUp(stage, { pointerId: 1 })
+    expect(useUIStore.getState().selectedSketchIds).toEqual([])
+    fireEvent.doubleClick(sketch)
+    expect(useUIStore.getState()).toMatchObject({
+      selectedSketchIds: ['editable'],
+      tool: 'Select'
+    })
+
+    fireEvent.pointerDown(sketch, {
+      clientX: 100,
+      clientY: 100,
+      pointerId: 2
+    })
     fireEvent.pointerMove(stage, { clientX: 140, clientY: 120, pointerId: 2 })
     fireEvent.pointerUp(stage, { pointerId: 2 })
     let points =
       useUIStore.getState().sceneLayers[0].sketches[0].shapes[0].points
-    expect(points[0]).toMatchObject({ x: 30, y: 25 })
+    expect(points[0]).toMatchObject({ x: 30, y: 30 })
     const scaleHandle = document.querySelector(
-      '[data-sketch-id="editable"] [data-handle="scale"]'
+      '[data-sketch-id="editable"] [data-handle-position="se"]'
     )!
     fireEvent.pointerDown(scaleHandle, {
       clientX: 140,
@@ -529,7 +587,10 @@ describe('Layer sketch workspace', () => {
     fireEvent.pointerUp(stage, { pointerId: 3 })
     points = useUIStore.getState().sceneLayers[0].sketches[0].shapes[0].points
     expect(points[1].x - points[0].x).toBeGreaterThan(30)
-    const beforeRotate = { ...points[0] }
+    const screenLengthBefore = Math.hypot(
+      (points[1].x - points[0].x) * 2,
+      points[1].y - points[0].y
+    )
     const rotateHandle = document.querySelector(
       '[data-sketch-id="editable"] [data-handle="rotate"]'
     )!
@@ -540,8 +601,16 @@ describe('Layer sketch workspace', () => {
     })
     fireEvent.pointerMove(stage, { clientX: 220, clientY: 100, pointerId: 4 })
     fireEvent.pointerUp(stage, { pointerId: 4 })
-    points = useUIStore.getState().sceneLayers[0].sketches[0].shapes[0].points
-    expect(points[0]).not.toEqual(beforeRotate)
+    const rotatedShape =
+      useUIStore.getState().sceneLayers[0].sketches[0].shapes[0]
+    expect(rotatedShape.type).toBe('pen')
+    expect(rotatedShape.points).toHaveLength(4)
+    points = rotatedShape.points
+    const screenLengthAfter = Math.hypot(
+      (points[2].x - points[0].x) * 2,
+      points[2].y - points[0].y
+    )
+    expect(screenLengthAfter).toBeCloseTo(screenLengthBefore, 6)
   })
 
   it('merges line primitives into a selected closed contour', () => {
